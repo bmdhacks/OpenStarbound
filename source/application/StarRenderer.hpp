@@ -129,8 +129,6 @@ public:
   virtual String rendererId() const = 0;
   virtual Vec2U screenSize() const = 0;
 
-  virtual void loadConfig(Json const& config) = 0;
-
   // The actual shaders used by this renderer will be in a default no effects
   // state when constructed, but can be overridden here.  This config will be
   // specific to each type of renderer, so it will be necessary to key the
@@ -156,7 +154,6 @@ public:
       TextureFiltering filtering = TextureFiltering::Nearest) = 0;
   virtual void setSizeLimitEnabled(bool enabled) = 0;
   virtual void setMultiTexturingEnabled(bool enabled) = 0;
-  virtual void setMultiSampling(unsigned multiSampling) = 0;
   virtual TextureGroupPtr createTextureGroup(TextureGroupSize size = TextureGroupSize::Medium, TextureFiltering filtering = TextureFiltering::Nearest) = 0;
   virtual RenderBufferPtr createRenderBuffer() = 0;
 

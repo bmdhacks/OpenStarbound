@@ -494,20 +494,21 @@ set(STAR_EXT_LIBS ${STAR_EXT_LIBS}
 )
 
 if(STAR_BUILD_GUI)
-  find_package(SDL2 CONFIG REQUIRED)
+#  find_package(SDL2 CONFIG REQUIRED)
 
-  set(STAR_EXT_GUI_LIBS
-    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-  )
+#  set(STAR_EXT_GUI_LIBS
+#    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
+#    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
+#  )
 
-  find_package(OpenGL REQUIRED)
-  find_package(GLEW REQUIRED)
+#  find_package(OpenGL REQUIRED)
+#  find_package(GLEW REQUIRED)
 
-  include_directories(SYSTEM ${GLEW_INCLUDE_DIR})
+#  include_directories(SYSTEM ${GLEW_INCLUDE_DIR})
   set(STAR_EXT_GUI_LIBS ${STAR_EXT_GUI_LIBS}
       ${OPENGL_LIBRARY}
-      GLEW::glew_s
+	  SDL2
+#      GLEW::glew_s
   )
 
   if(STAR_SYSTEM_MACOS)

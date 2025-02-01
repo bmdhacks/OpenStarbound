@@ -28,6 +28,7 @@ SET (star_application_SOURCES ${star_application_SOURCES}
     StarP2PNetworkingService_pc.cpp
     StarPlatformServices_pc.cpp
     StarRenderer_opengl.cpp
+    glad/glad.cpp
   )
 
 IF (STAR_ENABLE_STEAM_INTEGRATION)

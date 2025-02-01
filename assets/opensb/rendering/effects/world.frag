@@ -1,5 +1,8 @@
-#version 140
+#ifdef GL_ES
+precision mediump float;
+#endif
 
+// Uniforms
 uniform sampler2D texture0;
 uniform sampler2D texture1;
 uniform sampler2D texture2;
@@ -9,13 +12,12 @@ uniform vec2 lightMapSize;
 uniform sampler2D lightMap;
 uniform float lightMapMultiplier;
 
-in vec2 fragmentTextureCoordinate;
-flat in int fragmentTextureIndex;
-in vec4 fragmentColor;
-in float fragmentLightMapMultiplier;
-in vec2 fragmentLightMapCoordinate;
-
-out vec4 outColor;
+// Varyings
+varying vec2 vFragmentTextureCoordinate;
+varying float vFragmentTextureIndex;
+varying vec4 vFragmentColor;
+varying float vFragmentLightMapMultiplier;
+varying vec2 vFragmentLightMapCoordinate;
 
 vec4 cubic(float v) {
   vec4 n = vec4(1.0, 2.0, 3.0, 4.0) - v;
@@ -28,8 +30,8 @@ vec4 cubic(float v) {
 }
 
 vec4 bicubicSample(sampler2D tex, vec2 texcoord, vec2 texscale) {
-  texcoord = texcoord - vec2(0.5, 0.5);
-
+  texcoord -= vec2(0.5, 0.5);
+  
   float fx = fract(texcoord.x);
   float fy = fract(texcoord.y);
   texcoord.x -= fx;
@@ -42,10 +44,10 @@ vec4 bicubicSample(sampler2D tex, vec2 texcoord, vec2 texscale) {
   vec4 s = vec4(xcubic.x + xcubic.y, xcubic.z + xcubic.w, ycubic.x + ycubic.y, ycubic.z + ycubic.w);
   vec4 offset = c + vec4(xcubic.y, xcubic.w, ycubic.y, ycubic.w) / s;
 
-  vec4 sample0 = texture(tex, vec2(offset.x, offset.z) * texscale);
-  vec4 sample1 = texture(tex, vec2(offset.y, offset.z) * texscale);
-  vec4 sample2 = texture(tex, vec2(offset.x, offset.w) * texscale);
-  vec4 sample3 = texture(tex, vec2(offset.y, offset.w) * texscale);
+  vec4 sample0 = texture2D(tex, vec2(offset.x, offset.z) * texscale);
+  vec4 sample1 = texture2D(tex, vec2(offset.y, offset.z) * texscale);
+  vec4 sample2 = texture2D(tex, vec2(offset.x, offset.w) * texscale);
+  vec4 sample3 = texture2D(tex, vec2(offset.y, offset.w) * texscale);
 
   float sx = s.x / (s.x + s.y);
   float sy = s.z / (s.z + s.w);
@@ -56,33 +58,35 @@ vec4 bicubicSample(sampler2D tex, vec2 texcoord, vec2 texscale) {
 }
 
 vec3 sampleLight(vec2 coord, vec2 scale) {
-  //soften super bright lights a little
+  // Soften super bright lights a little
   const float threshold = 1.0;
   vec3 rgb = bicubicSample(lightMap, coord, scale).rgb;
   vec3 lower = min(rgb, threshold);
   vec3 upper = max(rgb, threshold) - threshold;
-  return lower + (upper / (vec3(1.) + upper));
+  return lower + (upper / (vec3(1.0) + upper));
 }
 
 void main() {
   vec4 texColor;
-  if (fragmentTextureIndex == 3)
-    texColor = texture(texture3, fragmentTextureCoordinate);
-  else if (fragmentTextureIndex == 2)
-    texColor = texture(texture2, fragmentTextureCoordinate);
-  else if (fragmentTextureIndex == 1)
-    texColor = texture(texture1, fragmentTextureCoordinate);
+  if (vFragmentTextureIndex > 2.9)
+    texColor = texture2D(texture3, vFragmentTextureCoordinate);
+  else if (vFragmentTextureIndex > 1.9)
+    texColor = texture2D(texture2, vFragmentTextureCoordinate);
+  else if (vFragmentTextureIndex > 0.9)
+    texColor = texture2D(texture1, vFragmentTextureCoordinate);
   else
-    texColor = texture(texture0, fragmentTextureCoordinate);
+    texColor = texture2D(texture0, vFragmentTextureCoordinate);
 
   if (texColor.a <= 0.0)
     discard;
 
-  vec4 finalColor = texColor * fragmentColor;
-  float finalLightMapMultiplier = fragmentLightMapMultiplier * lightMapMultiplier;
-  if (texColor.a == 0.99607843137)
-    finalColor.a = fragmentColor.a;
+  vec4 finalColor = texColor * vFragmentColor;
+  float finalLightMapMultiplier = vFragmentLightMapMultiplier * lightMapMultiplier;
+  
+  if (abs(texColor.a - 0.99607843137) < 0.001)
+    finalColor.a = vFragmentColor.a;
   else if (lightMapEnabled && finalLightMapMultiplier > 0.0)
-    finalColor.rgb *= sampleLight(fragmentLightMapCoordinate, 1.0 / lightMapSize) * finalLightMapMultiplier;
-  outColor = finalColor;
+    finalColor.rgb *= sampleLight(vFragmentLightMapCoordinate, 1.0 / lightMapSize) * finalLightMapMultiplier;
+
+  gl_FragColor = finalColor;
 }

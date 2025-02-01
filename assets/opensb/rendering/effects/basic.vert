@@ -1,6 +1,8 @@
-#version 140
+#ifdef GL_ES
+precision mediump float;
+#endif
 
-in vec2 vertexPosition;
+attribute vec2 vertexPosition;
 
 void main() {
   gl_Position = vec4(vertexPosition, 0.0, 1.0);

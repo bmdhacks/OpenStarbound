@@ -9,6 +9,7 @@
 
 #include "SDL2/SDL.h"
 #include "StarPlatformServices_pc.hpp"
+#include <SDL2/SDL_video.h>
 
 #ifdef STAR_SYSTEM_WINDOWS
 #include "SDL2/SDL_syswm.h"
@@ -290,6 +291,7 @@ public:
 
     SDL_ShowWindow(m_sdlWindow);
     SDL_RaiseWindow(m_sdlWindow);
+	SDL_SetWindowFullscreen(m_sdlWindow, SDL_WINDOW_FULLSCREEN);
 
 // Makes the window border black. From https://github.com/libsdl-org/SDL/commit/89948787#diff-f2ae5c36a8afc0a9a343a6664ab306da2963213e180af8cd97b12397dcbb9ae7R1478
 #ifdef STAR_SYSTEM_WINDOWS

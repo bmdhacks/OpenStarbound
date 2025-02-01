@@ -1,5 +1,8 @@
-#version 140
+#ifdef GL_ES
+precision mediump float;
+#endif
 
+// Uniforms (same as original)
 uniform vec2 textureSize0;
 uniform vec2 textureSize1;
 uniform vec2 textureSize2;
@@ -7,29 +10,37 @@ uniform vec2 textureSize3;
 uniform vec2 screenSize;
 uniform mat3 vertexTransform;
 
-in vec2 vertexPosition;
-in vec4 vertexColor;
-in vec2 vertexTextureCoordinate;
-in int vertexData;
+// Attributes (note: vertexData is now a float)
+attribute vec2 aVertexPosition;
+attribute vec4 aVertexColor;
+attribute vec2 aVertexTextureCoordinate;
+attribute float aVertexData;  // originally an int
 
-out vec2 fragmentTextureCoordinate;
-flat out int fragmentTextureIndex;
-out vec4 fragmentColor;
+// Varyings passed to the fragment shader
+varying vec2 vFragmentTextureCoordinate;
+varying float vFragmentTextureIndex;
+varying vec4 vFragmentColor;
 
 void main() {
-  vec2 screenPosition = (vertexTransform * vec3(vertexPosition, 1.0)).xy;
+  // Transform the vertex position.
+  vec2 screenPosition = (vertexTransform * vec3(aVertexPosition, 1.0)).xy;
   gl_Position = vec4(screenPosition / screenSize * 2.0 - 1.0, 0.0, 1.0);
   
-  int vertexTextureIndex = vertexData & 0x3;
-  if (vertexTextureIndex == 3)
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize3;
-  else if (vertexTextureIndex == 2)
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize2;
-  else if (vertexTextureIndex == 1)
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize1;
+  // Extract the texture index from the lower two bits of aVertexData.
+  // This emulates: int vertexTextureIndex = vertexData & 0x3;
+  float texIndex = mod(aVertexData, 4.0);
+  
+  // Select the proper texture coordinate based on the texture index.
+  if (texIndex == 3.0)
+    vFragmentTextureCoordinate = aVertexTextureCoordinate / textureSize3;
+  else if (texIndex == 2.0)
+    vFragmentTextureCoordinate = aVertexTextureCoordinate / textureSize2;
+  else if (texIndex == 1.0)
+    vFragmentTextureCoordinate = aVertexTextureCoordinate / textureSize1;
   else
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize0;
-
-  fragmentTextureIndex = vertexTextureIndex;
-  fragmentColor = vertexColor;
+    vFragmentTextureCoordinate = aVertexTextureCoordinate / textureSize0;
+  
+  // Pass the texture index and vertex color to the fragment shader.
+  vFragmentTextureIndex = texIndex;
+  vFragmentColor = aVertexColor;
 }

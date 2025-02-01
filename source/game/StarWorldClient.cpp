@@ -36,7 +36,7 @@ WorldClient::WorldClient(PlayerPtr mainPlayer, LuaRootPtr luaRoot) {
 
   m_currentStep = 0;
   m_currentTime = 0;
-  m_fullBright = false;
+  m_fullBright = true;
   m_asyncLighting = false;
   m_worldDimTimer = GameTimer(m_clientConfig.getFloat("worldDimTime"));
   m_worldDimTimer.setDone();

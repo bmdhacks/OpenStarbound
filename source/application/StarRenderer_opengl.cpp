@@ -3,12 +3,16 @@
 #include "StarCasting.hpp"
 #include "StarLogging.hpp"
 
+#include <SDL2/SDL.h>
+
 namespace Star {
 
 size_t const MultiTextureCount = 4;
 
 char const* DefaultVertexShader = R"SHADER(
-#version 140
+#ifdef GL_ES
+precision mediump float;
+#endif
 
 uniform vec2 textureSize0;
 uniform vec2 textureSize1;
@@ -17,85 +21,70 @@ uniform vec2 textureSize3;
 uniform vec2 screenSize;
 uniform mat3 vertexTransform;
 
-in vec2 vertexPosition;
-in vec4 vertexColor;
-in vec2 vertexTextureCoordinate;
-in int vertexData;
+attribute vec2 vertexPosition;
+attribute vec2 vertexTextureCoordinate;
+attribute float vertexTextureIndex;
+attribute vec4 vertexColor;
+attribute float vertexParam1;  // Note: vertexParam1 is unused in this shader.
 
-out vec2 fragmentTextureCoordinate;
-flat out int fragmentTextureIndex;
-out vec4 fragmentColor;
+varying vec2 fragmentTextureCoordinate;
+varying float fragmentTextureIndex;
+varying vec4 fragmentColor;
 
 void main() {
+  // Transform the vertex position.
   vec2 screenPosition = (vertexTransform * vec3(vertexPosition, 1.0)).xy;
   gl_Position = vec4(screenPosition / screenSize * 2.0 - 1.0, 0.0, 1.0);
-  if (((vertexData >> 3) & 0x1) == 1)
-    screenPosition.x = round(screenPosition.x);
-  if (((vertexData >> 4) & 0x1) == 1)
-    screenPosition.y = round(screenPosition.y);
-  int vertexTextureIndex = vertexData & 0x3;
-  if (vertexTextureIndex == 3)
+  
+  // Choose texture coordinate scaling based on the texture index.
+  if (vertexTextureIndex > 2.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize3;
-  else if (vertexTextureIndex == 2)
+  } else if (vertexTextureIndex > 1.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize2;
-  else if (vertexTextureIndex == 1)
+  } else if (vertexTextureIndex > 0.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize1;
-  else
+  } else {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize0;
-
+  }
+  
   fragmentTextureIndex = vertexTextureIndex;
   fragmentColor = vertexColor;
 }
 )SHADER";
 
 char const* DefaultFragmentShader = R"SHADER(
-#version 140
+#ifdef GL_ES
+precision mediump float;
+#endif
 
 uniform sampler2D texture0;
 uniform sampler2D texture1;
 uniform sampler2D texture2;
 uniform sampler2D texture3;
 
-in vec2 fragmentTextureCoordinate;
-flat in int fragmentTextureIndex;
-in vec4 fragmentColor;
-
-out vec4 outColor;
+varying vec2 fragmentTextureCoordinate;
+varying float fragmentTextureIndex;
+varying vec4 fragmentColor;
 
 void main() {
-  vec4 texColor;
-  if (fragmentTextureIndex == 3)
-    texColor = texture(texture3, fragmentTextureCoordinate);
-  else if (fragmentTextureIndex == 2)
-    texColor = texture(texture2, fragmentTextureCoordinate);
-  else if (fragmentTextureIndex == 1)
-    texColor = texture(texture1, fragmentTextureCoordinate);
-  else
-    texColor = texture(texture0, fragmentTextureCoordinate);
-
-  if (texColor.a <= 0.0)
-    discard;
-
-  outColor = texColor * fragmentColor;
+  if (fragmentTextureIndex > 2.9) {
+    gl_FragColor = texture2D(texture3, fragmentTextureCoordinate) * fragmentColor;
+  } else if (fragmentTextureIndex > 1.9) {
+    gl_FragColor = texture2D(texture2, fragmentTextureCoordinate) * fragmentColor;
+  } else if (fragmentTextureIndex > 0.9) {
+    gl_FragColor = texture2D(texture1, fragmentTextureCoordinate) * fragmentColor;
+  } else {
+    gl_FragColor = texture2D(texture0, fragmentTextureCoordinate) * fragmentColor;
+  }
 }
 )SHADER";
 
-/*
-static void GLAPIENTRY GlMessageCallback(GLenum, GLenum type, GLuint, GLenum, GLsizei, const GLchar* message, const void* renderer) {
-  if (type == GL_DEBUG_TYPE_ERROR) {
-    Logger::error("GL ERROR: {}", message);
-    __debugbreak();
-  }
-}
-*/
-
 OpenGlRenderer::OpenGlRenderer() {
-  auto glewResult = glewInit();
-  if (glewResult != GLEW_OK && glewResult != GLEW_ERROR_NO_GLX_DISPLAY)
-    throw RendererException::format("Could not initialize GLEW: {}", (char*)glewGetErrorString(glewResult));
 
-  if (!GLEW_VERSION_2_0)
-    throw RendererException("OpenGL 2.0 not available!");
+  // Initialize GLAD
+  if (!gladLoadGLES2Loader((GLADloadproc)SDL_GL_GetProcAddress)) {
+    throw RendererException("Could not initialize GLAD");
+  }
 
   Logger::info("OpenGL version: '{}' vendor: '{}' renderer: '{}' shader: '{}'",
       (const char*)glGetString(GL_VERSION),
@@ -104,13 +93,10 @@ OpenGlRenderer::OpenGlRenderer() {
       (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
 
   glClearColor(0.0, 0.0, 0.0, 1.0);
+  glEnable(GL_TEXTURE_2D);
   glEnable(GL_BLEND);
   glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
   glDisable(GL_DEPTH_TEST);
-  if (GLEW_VERSION_4_3) {
-    //glEnable(GL_DEBUG_OUTPUT);
-    //glDebugMessageCallback(GlMessageCallback, this);
-  }
 
   m_whiteTexture = createGlTexture(Image::filled({1, 1}, Vec4B(255, 255, 255, 255), PixelFormat::RGBA32),
       TextureAddressing::Clamp,
@@ -121,7 +107,6 @@ OpenGlRenderer::OpenGlRenderer() {
 
   m_limitTextureGroupSize = false;
   m_useMultiTexturing = true;
-  m_multiSampling = false;
 
   logGlErrorSummary("OpenGL errors during renderer initialization");
 }
@@ -130,7 +115,6 @@ OpenGlRenderer::~OpenGlRenderer() {
   for (auto& effect : m_effects)
     glDeleteProgram(effect.second.program);
 
-  m_frameBuffers.clear();
   logGlErrorSummary("OpenGL errors during shutdown");
 }
 
@@ -140,78 +124,6 @@ String OpenGlRenderer::rendererId() const {
 
 Vec2U OpenGlRenderer::screenSize() const {
   return m_screenSize;
-}
-
-OpenGlRenderer::GlFrameBuffer::GlFrameBuffer(Json const& fbConfig) : config(fbConfig) {
-  texture = make_ref<GlLoneTexture>();
-  texture->textureFiltering = TextureFiltering::Nearest;
-  texture->textureAddressing = TextureAddressing::Clamp;
-  texture->textureSize = {0, 0};
-  glGenTextures(1, &texture->textureId);
-  if (texture->textureId == 0)
-    throw RendererException("Could not generate OpenGL texture for framebuffer");
-
-  multisample = GLEW_VERSION_4_0 ? config.getUInt("multisample", 0) : 0;
-  GLenum target = multisample ? GL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D;
-  glBindTexture(target, texture->glTextureId());
-
-  sizeDiv = config.getUInt("sizeDiv", 1);
-  Vec2U size = jsonToVec2U(config.getArray("size", { 256, 256 })) / sizeDiv;
-
-  if (multisample)
-    glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, multisample, GL_RGBA8, size[0], size[1], GL_TRUE);
-  else {
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, size[0], size[1], 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-  }
-  auto addressing = TextureAddressingNames.getLeft(config.getString("textureAddressing", "clamp"));
-  auto filtering = TextureFilteringNames.getLeft(config.getString("textureFiltering", "nearest"));
-  if (addressing == TextureAddressing::Clamp) {
-    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  } else {
-    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_REPEAT);
-  }
-  if (!multisample) {
-    if (filtering == TextureFiltering::Nearest) {
-      glTexParameterf(target, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-      glTexParameterf(target, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    } else {
-      glTexParameterf(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-      glTexParameterf(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    }
-  }
-
-  glGenFramebuffers(1, &id);
-  if (!id)
-    throw RendererException("Failed to create OpenGL framebuffer");
-
-  glBindFramebuffer(GL_FRAMEBUFFER, id);
-  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, texture->glTextureId(), 0);
-
-  auto framebufferStatus = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-  if (framebufferStatus != GL_FRAMEBUFFER_COMPLETE)
-    throw RendererException("OpenGL framebuffer is not complete!");
-}
-
-
-OpenGlRenderer::GlFrameBuffer::~GlFrameBuffer() {
-  glDeleteFramebuffers(1, &id);
-  texture.reset();
-}
-
-void OpenGlRenderer::loadConfig(Json const& config) {
-  m_frameBuffers.clear();
-
-  for (auto& pair : config.getObject("frameBuffers", {})) {
-    Json config = pair.second;
-    config = config.set("multisample", m_multiSampling);
-    Logger::info("Creating framebuffer {}", pair.first);
-    m_frameBuffers[pair.first] = make_ref<GlFrameBuffer>(config);
-
-  }
-  setScreenSize(m_screenSize);
-  m_config = config;
 }
 
 void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConfig, StringMap<String> const& shaders) {
@@ -280,16 +192,15 @@ void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConf
   auto& effect = m_effects.emplace(name, Effect()).first->second;
   effect.program = m_program;
   effect.config = effectConfig;
-  effect.includeVBTextures = effectConfig.getBool("includeVBTextures",true);
   m_currentEffect = &effect;
-  setupGlUniforms(effect, m_screenSize);
+  setupGlUniforms(effect);
 
   for (auto const& p : effectConfig.getObject("effectParameters", {})) {
     EffectParameter effectParameter;
 
     effectParameter.parameterUniform = glGetUniformLocation(m_program, p.second.getString("uniform").utf8Ptr());
     if (effectParameter.parameterUniform == -1) {
-      Logger::warn("OpenGL20 effect parameter '{}' in effect '{}' has no associated uniform, skipping", p.first, name);
+      Logger::warn("OpenGL20 effect parameter '{}' has no associated uniform, skipping", p.first);
     } else {
       String type = p.second.getString("type");
       if (type == "bool") {
@@ -308,39 +219,21 @@ void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConf
         throw RendererException::format("Unrecognized effect parameter type '{}'", type);
       }
 
-      if (p.second.getBool("scriptable",false)) {
-        if (Json def = p.second.get("default", {})) {
-          if (type == "bool") {
-            effectParameter.parameterValue = (RenderEffectParameter)def.toBool();
-          } else if (type == "int") {
-            effectParameter.parameterValue = (RenderEffectParameter)(int)def.toInt();
-          } else if (type == "float") {
-            effectParameter.parameterValue = (RenderEffectParameter)def.toFloat();
-          } else if (type == "vec2") {
-            effectParameter.parameterValue = (RenderEffectParameter)jsonToVec2F(def);
-          } else if (type == "vec3") {
-            effectParameter.parameterValue = (RenderEffectParameter)jsonToVec3F(def);
-          } else if (type == "vec4") {
-            effectParameter.parameterValue = (RenderEffectParameter)jsonToVec4F(def);
-          }
-        }
-        effect.scriptables[p.first] = effectParameter;
-      } else {
-        effect.parameters[p.first] = effectParameter;
-        if (Json def = p.second.get("default", {})) {
-          if (type == "bool") {
-            setEffectParameter(p.first, def.toBool());
-          } else if (type == "int") {
-            setEffectParameter(p.first, (int)def.toInt());
-          } else if (type == "float") {
-            setEffectParameter(p.first, def.toFloat());
-          } else if (type == "vec2") {
-            setEffectParameter(p.first, jsonToVec2F(def));
-          } else if (type == "vec3") {
-            setEffectParameter(p.first, jsonToVec3F(def));
-          } else if (type == "vec4") {
-            setEffectParameter(p.first, jsonToVec4F(def));
-          }
+      effect.parameters[p.first] = effectParameter;
+
+      if (Json def = p.second.get("default", {})) {
+        if (type == "bool") {
+          setEffectParameter(p.first, def.toBool());
+        } else if (type == "int") {
+          setEffectParameter(p.first, (int)def.toInt());
+        } else if (type == "float") {
+          setEffectParameter(p.first, def.toFloat());
+        } else if (type == "vec2") {
+          setEffectParameter(p.first, jsonToVec2F(def));
+        } else if (type == "vec3") {
+          setEffectParameter(p.first, jsonToVec3F(def));
+        } else if (type == "vec4") {
+          setEffectParameter(p.first, jsonToVec4F(def));
         }
       }
     }
@@ -349,7 +242,7 @@ void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConf
   // Assign each texture parameter a texture unit starting with MultiTextureCount, the first
   // few texture units are used by the primary textures being drawn.  Currently,
   // maximum texture units are not checked.
-  unsigned parameterTextureUnit = effect.includeVBTextures ? MultiTextureCount : 0;
+  unsigned parameterTextureUnit = MultiTextureCount;
 
   for (auto const& p : effectConfig.getObject("effectTextures", {})) {
     EffectTexture effectTexture;
@@ -382,7 +275,7 @@ void OpenGlRenderer::setEffectParameter(String const& parameterName, RenderEffec
     return;
 
   if (ptr->parameterType != value.typeIndex())
-    throw RendererException::format("OpenGlRenderer::setEffectParameter '{}' parameter type mismatch", parameterName);
+    throw RendererException::format("OpenGL20Renderer::setEffectParameter '{}' parameter type mismatch", parameterName);
 
   flushImmediatePrimitives();
 
@@ -400,50 +293,6 @@ void OpenGlRenderer::setEffectParameter(String const& parameterName, RenderEffec
     glUniform4f(ptr->parameterUniform, (*v)[0], (*v)[1], (*v)[2], (*v)[3]);
 
   ptr->parameterValue = value;
-}
-
-void OpenGlRenderer::setEffectScriptableParameter(String const& effectName, String const& parameterName, RenderEffectParameter const& value) {
-  auto find = m_effects.find(effectName);
-  if (find == m_effects.end())
-    return;
-
-  Effect& effect = find->second;
-  
-  auto ptr = effect.scriptables.ptr(parameterName);
-  if (!ptr || (ptr->parameterValue && *ptr->parameterValue == value))
-    return;
-
-  if (ptr->parameterType != value.typeIndex())
-    throw RendererException::format("OpenGlRenderer::setEffectScriptableParameter '{}' parameter type mismatch", parameterName);
-
-  ptr->parameterValue = value;
-}
-
-Maybe<RenderEffectParameter> OpenGlRenderer::getEffectScriptableParameter(String const& effectName, String const& parameterName) {
-  auto find = m_effects.find(effectName);
-  if (find == m_effects.end())
-    return {};
-
-  Effect& effect = find->second;
-
-  auto ptr = effect.scriptables.ptr(parameterName);
-  if (!ptr)
-    return {};
-  
-  return ptr->parameterValue;
-}
-Maybe<VariantTypeIndex> OpenGlRenderer::getEffectScriptableParameterType(String const& effectName, String const& parameterName) {
-  auto find = m_effects.find(effectName);
-  if (find == m_effects.end())
-    return {};
-
-  Effect& effect = find->second;
-
-  auto ptr = effect.scriptables.ptr(parameterName);
-  if (!ptr)
-    return {};
-  
-  return ptr->parameterType;
 }
 
 void OpenGlRenderer::setEffectTexture(String const& textureName, ImageView const& image) {
@@ -474,45 +323,11 @@ bool OpenGlRenderer::switchEffectConfig(String const& name) {
     return false;
 
   Effect& effect = find->second;
-  if (m_currentEffect == &effect)
-    return true;
-
-  if (auto blitFrameBufferId = effect.config.optString("blitFrameBuffer"))
-    blitGlFrameBuffer(getGlFrameBuffer(*blitFrameBufferId));
-
-  auto effectScreenSize = m_screenSize;
-  if (auto frameBufferId = effect.config.optString("frameBuffer")) {
-    auto buf = getGlFrameBuffer(*frameBufferId);
-    switchGlFrameBuffer(buf);
-    effectScreenSize = m_screenSize / (buf->sizeDiv);
-  } else {
-    m_currentFrameBuffer.reset();
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-  }
 
   glUseProgram(m_program = effect.program);
-  setupGlUniforms(effect, effectScreenSize);
+  setupGlUniforms(effect);
   m_currentEffect = &effect;
 
-  setEffectParameter("vertexRounding", m_multiSampling > 0);
-  if (auto fbts = effect.config.optArray("frameBufferTextures")) {
-    for (auto const& fbt : *fbts) {
-      if (auto frameBufferId = fbt.optString("framebuffer")) {
-        auto textureUniform = fbt.getString("texture");
-        auto ptr = m_currentEffect->textures.ptr(textureUniform);
-        if (ptr) {
-          if (!ptr->textureValue || ptr->textureValue->textureId == 0) {  
-            auto texture = getGlFrameBuffer(*frameBufferId)->texture;
-            ptr->textureValue = texture;
-            if (ptr->textureSizeUniform != -1) {
-              auto textureSize = ptr->textureValue->glTextureSize();
-              glUniform2f(ptr->textureSizeUniform, textureSize[0], textureSize[1]);
-            }
-          }
-        }
-      }
-    }
-  }
   return true;
 }
 
@@ -531,6 +346,18 @@ void OpenGlRenderer::setScissorRect(Maybe<RectI> const& scissorRect) {
   }
 }
 
+void OpenGlRenderer::setEffectScriptableParameter(String const& effectName, String const& parameterName, RenderEffectParameter const& parameter) {
+	return;
+}
+
+Maybe<RenderEffectParameter> OpenGlRenderer::getEffectScriptableParameter(String const& effectName, String const& parameterName) {
+  return Maybe<RenderEffectParameter>();
+}
+
+Maybe<VariantTypeIndex> OpenGlRenderer::getEffectScriptableParameterType(String const& effectName, String const& parameterName) {
+  return Maybe<VariantTypeIndex>();
+}
+
 TexturePtr OpenGlRenderer::createTexture(Image const& texture, TextureAddressing addressing, TextureFiltering filtering) {
   return createGlTexture(texture, addressing, filtering);
 }
@@ -543,27 +370,10 @@ void OpenGlRenderer::setMultiTexturingEnabled(bool enabled) {
   m_useMultiTexturing = enabled;
 }
 
-void OpenGlRenderer::setMultiSampling(unsigned multiSampling) {
-  if (m_multiSampling == multiSampling)
-    return;
-
-  m_multiSampling = multiSampling;
-  if (m_multiSampling) {
-    glEnable(GL_MULTISAMPLE);
-    glEnable(GL_SAMPLE_SHADING);
-    glMinSampleShading(1.f);
-  } else {
-    glMinSampleShading(0.f);
-    glDisable(GL_SAMPLE_SHADING);
-    glDisable(GL_MULTISAMPLE);
-  }
-  loadConfig(m_config);
-}
-
 TextureGroupPtr OpenGlRenderer::createTextureGroup(TextureGroupSize textureSize, TextureFiltering filtering) {
   int maxTextureSize;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-  maxTextureSize = min(maxTextureSize, (2 << 14));
+
   // Large texture sizes are not always supported
   if (textureSize == TextureGroupSize::Large && (m_limitTextureGroupSize || maxTextureSize < 4096))
     textureSize = TextureGroupSize::Medium;
@@ -602,38 +412,19 @@ void OpenGlRenderer::renderBuffer(RenderBufferPtr const& renderBuffer, Mat3F con
 }
 
 void OpenGlRenderer::flush(Mat3F const& transformation) {
-  flushImmediatePrimitives(transformation);
+  flushImmediatePrimitives();
 }
 
 void OpenGlRenderer::setScreenSize(Vec2U screenSize) {
   m_screenSize = screenSize;
   glViewport(0, 0, m_screenSize[0], m_screenSize[1]);
   glUniform2f(m_screenSizeUniform, m_screenSize[0], m_screenSize[1]);
-
-  for (auto& frameBuffer : m_frameBuffers) {
-    unsigned sizeDiv = frameBuffer.second->sizeDiv;
-    if (unsigned multisample = frameBuffer.second->multisample) {
-      glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, frameBuffer.second->texture->glTextureId());
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, multisample, GL_RGBA8, m_screenSize[0] / sizeDiv, m_screenSize[1] / sizeDiv, GL_TRUE);
-    } else {
-      glBindTexture(GL_TEXTURE_2D, frameBuffer.second->texture->glTextureId());
-      glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, m_screenSize[0] / sizeDiv, m_screenSize[1] / sizeDiv, 0, GL_RGB, GL_UNSIGNED_BYTE, NULL);
-    }
-  }
 }
 
 void OpenGlRenderer::startFrame() {
   if (m_scissorRect)
     glDisable(GL_SCISSOR_TEST);
   
-  for (auto& frameBuffer : m_frameBuffers) {
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, frameBuffer.second->id);
-    glClear(GL_COLOR_BUFFER_BIT);
-    frameBuffer.second->blitted = false;
-  }
-
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
   glClear(GL_COLOR_BUFFER_BIT);
 
   if (m_scissorRect)
@@ -658,9 +449,6 @@ void OpenGlRenderer::finishFrame() {
         return false;
       });
 
-  // Blit if another shader hasn't
-  glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
   if (DebugEnabled)
     logGlErrorSummary("OpenGL errors this frame");
 }
@@ -672,7 +460,7 @@ GLuint OpenGlRenderer::GlTextureAtlasSet::createAtlasTexture(Vec2U const& size, 
   GLuint glTextureId;
   glGenTextures(1, &glTextureId);
   if (glTextureId == 0)
-    throw RendererException("Could not generate texture in OpenGlRenderer::TextureGroup::createAtlasTexture()");
+    throw RendererException("Could not generate texture in OpenGL20Renderer::TextureGroup::createAtlasTexture()");
 
   glBindTexture(GL_TEXTURE_2D, glTextureId);
 
@@ -706,12 +494,8 @@ void OpenGlRenderer::GlTextureAtlasSet::copyAtlasPixels(
     format = GL_RGB;
   else if (pixelFormat == PixelFormat::RGBA32)
     format = GL_RGBA;
-  else if (pixelFormat == PixelFormat::BGR24)
-    format = GL_BGR;
-  else if (pixelFormat == PixelFormat::BGRA32)
-    format = GL_BGRA;
   else
-    throw RendererException("Unsupported texture format in OpenGlRenderer::TextureGroup::copyAtlasPixels");
+    throw RendererException("Unsupported texture format in OpenGL20Renderer::TextureGroup::copyAtlasPixels");
 
   glTexSubImage2D(GL_TEXTURE_2D, 0, bottomLeft[0], bottomLeft[1], image.width(), image.height(), format, GL_UNSIGNED_BYTE, image.data());
 }
@@ -812,10 +596,6 @@ Vec2U OpenGlRenderer::GlLoneTexture::glTextureCoordinateOffset() const {
   return Vec2U();
 }
 
-OpenGlRenderer::GlRenderBuffer::GlRenderBuffer() {
-  glGenVertexArrays(1, &vertexArray);
-}
-
 OpenGlRenderer::GlRenderBuffer::~GlRenderBuffer() {
   for (auto const& texture : usedTextures) {
     if (auto gt = as<GlGroupedTexture>(texture.get()))
@@ -823,7 +603,6 @@ OpenGlRenderer::GlRenderBuffer::~GlRenderBuffer() {
   }
   for (auto const& vb : vertexBuffers)
     glDeleteBuffers(1, &vb.vertexBuffer);
-  glDeleteVertexArrays(1, &vertexArray);
 }
 
 void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
@@ -838,7 +617,7 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
   List<GLuint> currentTextures;
   List<Vec2U> currentTextureSizes;
   size_t currentVertexCount = 0;
-  glBindVertexArray(vertexArray);
+
   auto finishCurrentBuffer = [&]() {
     if (currentVertexCount > 0) {
       GlVertexBuffer vb;
@@ -894,58 +673,47 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
     return {float(textureIndex), Vec2F(glTexture->glTextureCoordinateOffset())};
   };
 
-  auto appendBufferVertex = [&](RenderVertex const& v, uint8_t textureIndex, Vec2F textureCoordinateOffset, RenderVertex const& prev, RenderVertex const& next) {
-    size_t off = accumulationBuffer.size();
-    accumulationBuffer.resize(accumulationBuffer.size() + sizeof(GlRenderVertex));
-    GlRenderVertex& glv = *(GlRenderVertex*)(accumulationBuffer.ptr() + off);
-    glv.pos = v.screenCoordinate;
-    glv.uv = v.textureCoordinate + textureCoordinateOffset;
-    glv.color = v.color;
-    glv.pack.vars.textureIndex = textureIndex;
-    glv.pack.vars.fullbright = v.param1 > 0.0f;
-    // Tell the vertex shader to round to the nearest pixel if the vertices form a straight
-    // edge, to ensure sharpness with supersampling. If we rounded *all* vertex positions,
-    // it'd cause slight visual issues with sprites rotating around a point.
-    glv.pack.vars.rX = min(abs(glv.pos.x() - prev.screenCoordinate.x()), abs(glv.pos.x() - next.screenCoordinate.x())) < 0.001f;
-    glv.pack.vars.rY = min(abs(glv.pos.y() - prev.screenCoordinate.y()), abs(glv.pos.y() - next.screenCoordinate.y())) < 0.001f;
-    glv.pack.vars.unused = 0;
+  auto appendBufferVertex = [&](RenderVertex const& v, float textureIndex, Vec2F textureCoordinateOffset) {
+    GlRenderVertex glv {
+      v.screenCoordinate,
+      v.textureCoordinate + textureCoordinateOffset,
+      textureIndex,
+      v.color,
+      v.param1
+    };
+    accumulationBuffer.append((char const*)&glv, sizeof(GlRenderVertex));
     ++currentVertexCount;
-    return glv;
   };
 
-  uint8_t textureIndex = 0;
+  float textureIndex = 0.0f;
   Vec2F textureOffset = {};
   for (auto& primitive : primitives) {
     if (auto tri = primitive.ptr<RenderTriangle>()) {
       tie(textureIndex, textureOffset) = addCurrentTexture(std::move(tri->texture));
 
-      appendBufferVertex(tri->a, textureIndex, textureOffset, tri->c, tri->b);
-      appendBufferVertex(tri->b, textureIndex, textureOffset, tri->a, tri->c);
-      appendBufferVertex(tri->c, textureIndex, textureOffset, tri->b, tri->a);
+      appendBufferVertex(tri->a, textureIndex, textureOffset);
+      appendBufferVertex(tri->b, textureIndex, textureOffset);
+      appendBufferVertex(tri->c, textureIndex, textureOffset);
 
     } else if (auto quad = primitive.ptr<RenderQuad>()) {
       tie(textureIndex, textureOffset) = addCurrentTexture(std::move(quad->texture));
 
-      // = prev and next are altered - the diagonal across the quad is bad for the rounding check
-      appendBufferVertex(quad->a, textureIndex, textureOffset, quad->d, quad->b);
-      appendBufferVertex(quad->b, textureIndex, textureOffset, quad->a, quad->c); //
-      appendBufferVertex(quad->c, textureIndex, textureOffset, quad->b, quad->d);
+      appendBufferVertex(quad->a, textureIndex, textureOffset);
+      appendBufferVertex(quad->b, textureIndex, textureOffset);
+      appendBufferVertex(quad->c, textureIndex, textureOffset);
 
-      appendBufferVertex(quad->a, textureIndex, textureOffset, quad->d, quad->b);
-      appendBufferVertex(quad->c, textureIndex, textureOffset, quad->b, quad->d); //
-      appendBufferVertex(quad->d, textureIndex, textureOffset, quad->c, quad->a);
+      appendBufferVertex(quad->a, textureIndex, textureOffset);
+      appendBufferVertex(quad->c, textureIndex, textureOffset);
+      appendBufferVertex(quad->d, textureIndex, textureOffset);
 
     } else if (auto poly = primitive.ptr<RenderPoly>()) {
       if (poly->vertexes.size() > 2) {
         tie(textureIndex, textureOffset) = addCurrentTexture(std::move(poly->texture));
 
         for (size_t i = 1; i < poly->vertexes.size() - 1; ++i) {
-            RenderVertex const& a = poly->vertexes[0],
-                                b = poly->vertexes[i],
-                                c = poly->vertexes[i + 1];
-          appendBufferVertex(a, textureIndex, textureOffset, c, b);
-          appendBufferVertex(b, textureIndex, textureOffset, a, c);
-          appendBufferVertex(c, textureIndex, textureOffset, b, a);
+          appendBufferVertex(poly->vertexes[0], textureIndex, textureOffset);
+          appendBufferVertex(poly->vertexes[i], textureIndex, textureOffset);
+          appendBufferVertex(poly->vertexes[i + 1], textureIndex, textureOffset);
         }
       }
     }
@@ -972,10 +740,6 @@ bool OpenGlRenderer::logGlErrorSummary(String prefix) {
         Logger::error("GL_INVALID_FRAMEBUFFER_OPERATION");
       } else if (error == GL_OUT_OF_MEMORY) {
         Logger::error("GL_OUT_OF_MEMORY");
-      } else if (error == GL_STACK_UNDERFLOW) {
-        Logger::error("GL_STACK_UNDERFLOW");
-      } else if (error == GL_STACK_OVERFLOW) {
-        Logger::error("GL_STACK_OVERFLOW");
       } else {
         Logger::error("<UNRECOGNIZED GL ERROR>");
       }
@@ -996,31 +760,23 @@ void OpenGlRenderer::uploadTextureImage(PixelFormat pixelFormat, Vec2U size, uin
   else if (pixelFormat == PixelFormat::RGBA32)
     format = GL_RGBA;
   else if (pixelFormat == PixelFormat::BGR24)
-    format = GL_BGR;
+	throw RendererException("Unsupported texture format (BGR24) in OpenGL20Renderer::uploadTextureImage");
   else if (pixelFormat == PixelFormat::BGRA32)
-    format = GL_BGRA;
-  else {
-    type = GL_FLOAT;
-    if (pixelFormat == PixelFormat::RGB_F) {
-      internalFormat = GL_RGB32F;
-      format = GL_RGB;
-    } else if (pixelFormat == PixelFormat::RGBA_F) {
-      internalFormat = GL_RGBA32F;
-      format = GL_RGBA;
-    } else
-      throw RendererException("Unsupported texture format in OpenGlRenderer::uploadTextureImage");
-  }
+	throw RendererException("Unsupported texture format (BGRA32) in OpenGL20Renderer::uploadTextureImage");
+  else
+	throw RendererException("Unsupported texture format in OpenGL20Renderer::uploadTextureImage");
+
 
   glTexImage2D(GL_TEXTURE_2D, 0, internalFormat.value(format), size[0], size[1], 0, format, type, data);
 }
 
-void OpenGlRenderer::flushImmediatePrimitives(Mat3F const& transformation) {
+void OpenGlRenderer::flushImmediatePrimitives() {
   if (m_immediatePrimitives.empty())
     return;
 
   m_immediateRenderBuffer->set(m_immediatePrimitives);
   m_immediatePrimitives.resize(0);
-  renderGlBuffer(*m_immediateRenderBuffer, transformation);
+  renderGlBuffer(*m_immediateRenderBuffer, Mat3F::identity());
 }
 
 auto OpenGlRenderer::createGlTexture(ImageView const& image, TextureAddressing addressing, TextureFiltering filtering)
@@ -1032,7 +788,7 @@ auto OpenGlRenderer::createGlTexture(ImageView const& image, TextureAddressing a
 
   glGenTextures(1, &glLoneTexture->textureId);
   if (glLoneTexture->textureId == 0)
-    throw RendererException("Could not generate texture in OpenGlRenderer::createGlTexture");
+    throw RendererException("Could not generate texture in OpenGL20Renderer::createGlTexture");
 
   glBindTexture(GL_TEXTURE_2D, glLoneTexture->textureId);
 
@@ -1070,12 +826,10 @@ void OpenGlRenderer::renderGlBuffer(GlRenderBuffer const& renderBuffer, Mat3F co
   for (auto const& vb : renderBuffer.vertexBuffers) {
     glUniformMatrix3fv(m_vertexTransformUniform, 1, GL_TRUE, transformation.ptr());
 
-    if (m_currentEffect->includeVBTextures) {
-      for (size_t i = 0; i < vb.textures.size(); ++i) {
-        glUniform2f(m_textureSizeUniforms[i], vb.textures[i].size[0], vb.textures[i].size[1]);
-        glActiveTexture(GL_TEXTURE0 + i);
-        glBindTexture(GL_TEXTURE_2D, vb.textures[i].texture);
-      }
+    for (size_t i = 0; i < vb.textures.size(); ++i) {
+      glUniform2f(m_textureSizeUniforms[i], vb.textures[i].size[0], vb.textures[i].size[1]);
+      glActiveTexture(GL_TEXTURE0 + i);
+      glBindTexture(GL_TEXTURE_2D, vb.textures[i].texture);
     }
 
     for (auto const& p : m_currentEffect->textures) {
@@ -1089,93 +843,44 @@ void OpenGlRenderer::renderGlBuffer(GlRenderBuffer const& renderBuffer, Mat3F co
 
     glEnableVertexAttribArray(m_positionAttribute);
     glEnableVertexAttribArray(m_texCoordAttribute);
+    glEnableVertexAttribArray(m_texIndexAttribute);
     glEnableVertexAttribArray(m_colorAttribute);
-    glEnableVertexAttribArray(m_dataAttribute);
 
-    glVertexAttribPointer(m_positionAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, pos));
-    glVertexAttribPointer(m_texCoordAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, uv));
+    glVertexAttribPointer(m_positionAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, screenCoordinate));
+    glVertexAttribPointer(m_texCoordAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, textureCoordinate));
+    glVertexAttribPointer(m_texIndexAttribute, 1, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, textureIndex));
     glVertexAttribPointer(m_colorAttribute, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, color));
-    glVertexAttribIPointer(m_dataAttribute, 1, GL_INT, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, pack));
+
+    if (m_param1Attribute != -1) {
+      glEnableVertexAttribArray(m_param1Attribute);
+      glVertexAttribPointer(m_param1Attribute, 1, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, param1));
+    }
 
     glDrawArrays(GL_TRIANGLES, 0, vb.vertexCount);
   }
 }
 
 //Assumes the passed effect program is currently in use.
-void OpenGlRenderer::setupGlUniforms(Effect& effect, Vec2U screenSize) {
+void OpenGlRenderer::setupGlUniforms(Effect& effect) {
   m_positionAttribute = effect.getAttribute("vertexPosition");
-  m_colorAttribute = effect.getAttribute("vertexColor");
   m_texCoordAttribute = effect.getAttribute("vertexTextureCoordinate");
-  m_dataAttribute = effect.getAttribute("vertexData");
+  m_texIndexAttribute = effect.getAttribute("vertexTextureIndex");
+  m_colorAttribute = effect.getAttribute("vertexColor");
+  m_param1Attribute = effect.getAttribute("vertexParam1");
 
   m_textureUniforms.clear();
   m_textureSizeUniforms.clear();
-  if (effect.includeVBTextures) {
-    for (size_t i = 0; i < MultiTextureCount; ++i) {
-      m_textureUniforms.append(effect.getUniform(strf("texture{}", i).c_str()));
-      m_textureSizeUniforms.append(effect.getUniform(strf("textureSize{}", i).c_str()));
-    }
+  for (size_t i = 0; i < MultiTextureCount; ++i) {
+    m_textureUniforms.append(effect.getUniform(strf("texture{}", i).c_str()));
+    m_textureSizeUniforms.append(effect.getUniform(strf("textureSize{}", i).c_str()));
   }
   m_screenSizeUniform = effect.getUniform("screenSize");
   m_vertexTransformUniform = effect.getUniform("vertexTransform");
 
-  if (effect.includeVBTextures) {
-    for (size_t i = 0; i < MultiTextureCount; ++i)
-      glUniform1i(m_textureUniforms[i], i);
-  }
+  for (size_t i = 0; i < MultiTextureCount; ++i)
+    glUniform1i(m_textureUniforms[i], i);
 
-  glUniform2f(m_screenSizeUniform, screenSize[0], screenSize[1]);
-  
-  for (auto& param : effect.scriptables) {
-    auto ptr = &param.second;
-    auto mvalue = ptr->parameterValue;
-    if (mvalue) {
-      RenderEffectParameter value = mvalue.value();
-      if (auto v = value.ptr<bool>())
-        glUniform1i(ptr->parameterUniform, *v);
-      else if (auto v = value.ptr<int>())
-        glUniform1i(ptr->parameterUniform, *v);
-      else if (auto v = value.ptr<float>())
-        glUniform1f(ptr->parameterUniform, *v);
-      else if (auto v = value.ptr<Vec2F>())
-        glUniform2f(ptr->parameterUniform, (*v)[0], (*v)[1]);
-      else if (auto v = value.ptr<Vec3F>())
-        glUniform3f(ptr->parameterUniform, (*v)[0], (*v)[1], (*v)[2]);
-      else if (auto v = value.ptr<Vec4F>())
-        glUniform4f(ptr->parameterUniform, (*v)[0], (*v)[1], (*v)[2], (*v)[3]);
-    }
-  }
-}
-
-RefPtr<OpenGlRenderer::GlFrameBuffer> OpenGlRenderer::getGlFrameBuffer(String const& id) {
-  if (auto ptr = m_frameBuffers.ptr(id))
-    return *ptr;
-  else
-    throw RendererException::format("Frame buffer '{}' does not exist", id);
-}
-
-void OpenGlRenderer::blitGlFrameBuffer(RefPtr<GlFrameBuffer> const& frameBuffer) {
-  if (frameBuffer->blitted)
-    return;
-
-  auto& size = m_screenSize;
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, frameBuffer->id);
-  glBlitFramebuffer(
-    0, 0, size[0], size[1],
-    0, 0, size[0], size[1],
-    GL_COLOR_BUFFER_BIT, GL_NEAREST
-  );
-
-  frameBuffer->blitted = true;
-}
-
-void OpenGlRenderer::switchGlFrameBuffer(RefPtr<GlFrameBuffer> const& frameBuffer) {
-  if (m_currentFrameBuffer == frameBuffer)
-    return;
-
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, frameBuffer->id);
-  m_currentFrameBuffer = frameBuffer;
+  glUniform2f(m_screenSizeUniform, m_screenSize[0], m_screenSize[1]);
 }
 
 GLuint OpenGlRenderer::Effect::getAttribute(String const& name) {

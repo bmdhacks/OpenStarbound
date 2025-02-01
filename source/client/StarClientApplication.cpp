@@ -373,7 +373,6 @@ void ClientApplication::render() {
   auto assets = m_root->assets();
   auto& renderer = Application::renderer();
 
-  renderer->setMultiSampling(config->get("antiAliasing").optBool().value(false) ? 4 : 0);
   renderer->switchEffectConfig("interface");
 
   if (auto interfaceScale = config->get("interfaceScale").optUInt().value())
@@ -468,8 +467,6 @@ void ClientApplication::renderReload() {
       Logger::warn("No rendering config found for renderer with id '{}'", renderer->rendererId());
   };
 
-  renderer->loadConfig(assets->json("/rendering/opengl.config"));
-  
   loadEffectConfig("world");
   
   // define post process groups and set them to be enabled/disabled based on config
