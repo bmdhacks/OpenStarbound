@@ -4,6 +4,8 @@
 /Output/
 /windows/
 /linux/
+/logs/
+/storage/
 /mac/
 /dist/
 /installer/
@@ -13,6 +15,7 @@
 /source/vcpkg_installed/
 enc_temp_folder/
 .cache/
+.clangd
 /attic/user/
 /attic/chucklefish/
 /attic/debug/
