@@ -556,6 +556,9 @@ void ClientApplication::changeState(MainAppState newState) {
   }
 
   if (oldState > MainAppState::Title && m_state == MainAppState::Title) {
+    m_titleScreen = make_shared<TitleScreen>(m_playerStorage, m_mainMixer->mixer(), m_universeClient);
+    if (auto renderer = Application::renderer())
+      m_titleScreen->renderInit(renderer);
     m_titleScreen->resetState();
     m_mainMixer->setUniverseClient({});
   }
@@ -724,6 +727,7 @@ void ClientApplication::changeState(MainAppState newState) {
     }
 
     m_titleScreen->stopMusic();
+    m_titleScreen.reset();
 
     m_universeClient->restartLua();
     m_mainInterface = make_shared<MainInterface>(m_universeClient, m_worldPainter, m_cinematicOverlay);
