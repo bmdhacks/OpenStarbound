@@ -11,9 +11,8 @@ uniform mat3 vertexTransform;
 
 attribute vec2 vertexPosition;
 attribute vec2 vertexTextureCoordinate;
-attribute float vertexTextureIndex;
 attribute vec4 vertexColor;
-attribute float vertexParam1;  // Note: vertexParam1 is unused in this shader.
+attribute float vertexData;
 
 varying vec2 fragmentTextureCoordinate;
 varying float fragmentTextureIndex;
@@ -23,6 +22,7 @@ void main() {
   // Transform the vertex position.
   vec2 screenPosition = (vertexTransform * vec3(vertexPosition, 1.0)).xy;
   gl_Position = vec4(screenPosition / screenSize * 2.0 - 1.0, 0.0, 1.0);
+  float vertexTextureIndex = mod(vertexData, 4.0);
   
   // Choose texture coordinate scaling based on the texture index.
   if (vertexTextureIndex > 2.9) {

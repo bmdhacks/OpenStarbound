@@ -1,6 +1,5 @@
-#ifdef GL_ES
+#version 100
 precision mediump float;
-#endif
 
 uniform vec2 textureSize0;
 uniform vec2 textureSize1;
@@ -8,33 +7,44 @@ uniform vec2 textureSize2;
 uniform vec2 textureSize3;
 uniform vec2 screenSize;
 uniform mat3 vertexTransform;
+uniform vec2 lightMapSize;
+uniform vec2 lightMapScale;
+uniform vec2 lightMapOffset;
 
 attribute vec2 vertexPosition;
 attribute vec2 vertexTextureCoordinate;
-attribute float vertexTextureIndex;
 attribute vec4 vertexColor;
-attribute float vertexParam1;  // Note: vertexParam1 is unused in this shader.
+attribute float vertexData; // textureIndex (bits 0-1), lightMapMultiplier (bit 2)
 
 varying vec2 fragmentTextureCoordinate;
 varying float fragmentTextureIndex;
 varying vec4 fragmentColor;
+varying float fragmentLightMapMultiplier; 
+varying vec2 fragmentLightMapCoordinate;
 
 void main() {
-  // Transform the vertex position.
-  vec2 screenPosition = (vertexTransform * vec3(vertexPosition, 1.0)).xy;
-  gl_Position = vec4(screenPosition / screenSize * 2.0 - 1.0, 0.0, 1.0);
+    // Unpack data
+  float textureIndex = mod(vertexData, 4.0); // Bits 0-1
+  float lightMapMultiplier = step(4.0, vertexData); // Bit 2
   
-  // Choose texture coordinate scaling based on the texture index.
-  if (vertexTextureIndex > 2.9) {
+  vec3 transformed = vertexTransform * vec3(vertexPosition, 1.0);
+  vec2 screenPosition = transformed.xy;
+  
+  fragmentTextureIndex = textureIndex;
+  fragmentLightMapMultiplier = lightMapMultiplier;
+  fragmentLightMapCoordinate = (screenPosition / lightMapScale) - lightMapOffset * lightMapSize / screenSize;
+  
+  // Texture coordinate selection
+  if (textureIndex > 2.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize3;
-  } else if (vertexTextureIndex > 1.9) {
+  } else if (textureIndex > 1.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize2;
-  } else if (vertexTextureIndex > 0.9) {
+  } else if (textureIndex > 0.9) {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize1;
   } else {
     fragmentTextureCoordinate = vertexTextureCoordinate / textureSize0;
   }
   
-  fragmentTextureIndex = vertexTextureIndex;
   fragmentColor = vertexColor;
+  gl_Position = vec4((screenPosition / screenSize) * 2.0 - 1.0, 0.0, 1.0);
 }

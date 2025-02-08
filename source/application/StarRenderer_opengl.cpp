@@ -25,7 +25,7 @@ attribute vec2 vertexPosition;
 attribute vec2 vertexTextureCoordinate;
 attribute float vertexTextureIndex;
 attribute vec4 vertexColor;
-attribute float vertexParam1;  // Note: vertexParam1 is unused in this shader.
+attribute float vertexData;  // Note: vertexData is unused in this shader.
 
 varying vec2 fragmentTextureCoordinate;
 varying float fragmentTextureIndex;
@@ -126,6 +126,7 @@ Vec2U OpenGlRenderer::screenSize() const {
 }
 
 void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConfig, StringMap<String> const& shaders) {
+
   if (auto effect = m_effects.ptr(name)) {
     Logger::info("Reloading OpenGL effect {}", name);
     glDeleteProgram(effect->program);
@@ -235,8 +236,11 @@ void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConf
           setEffectParameter(p.first, jsonToVec4F(def));
         }
       }
+      if (logGlErrorSummary("OpenGL errors after setting effect parameters"))
+        Logger::error("parameter={}", p.first);
     }
   }
+
 
   // Assign each texture parameter a texture unit starting with MultiTextureCount, the first
   // few texture units are used by the primary textures being drawn.  Currently,
@@ -269,6 +273,7 @@ void OpenGlRenderer::loadEffectConfig(String const& name, Json const& effectConf
 }
 
 void OpenGlRenderer::setEffectParameter(String const& parameterName, RenderEffectParameter const& value) {
+
   auto ptr = m_currentEffect->parameters.ptr(parameterName);
   if (!ptr || (ptr->parameterValue && *ptr->parameterValue == value))
     return;
@@ -372,7 +377,7 @@ void OpenGlRenderer::setMultiTexturingEnabled(bool enabled) {
 TextureGroupPtr OpenGlRenderer::createTextureGroup(TextureGroupSize textureSize, TextureFiltering filtering) {
   int maxTextureSize;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-
+  maxTextureSize = min(maxTextureSize, (2 << 14));
   // Large texture sizes are not always supported
   if (textureSize == TextureGroupSize::Large && (m_limitTextureGroupSize || maxTextureSize < 4096))
     textureSize = TextureGroupSize::Medium;
@@ -673,15 +678,19 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
   };
 
   auto appendBufferVertex = [&](RenderVertex const& v, float textureIndex, Vec2F textureCoordinateOffset) {
-    GlRenderVertex glv {
-      v.screenCoordinate,
-      v.textureCoordinate + textureCoordinateOffset,
-      textureIndex,
-      v.color,
-      v.param1
-    };
-    accumulationBuffer.append((char const*)&glv, sizeof(GlRenderVertex));
+    size_t off = accumulationBuffer.size();
+    accumulationBuffer.resize(accumulationBuffer.size() + sizeof(GlRenderVertex));
+    GlRenderVertex& glv = *(GlRenderVertex*)(accumulationBuffer.ptr() + off);
+    glv.pos = v.screenCoordinate;
+    glv.uv = v.textureCoordinate + textureCoordinateOffset;
+    glv.color = v.color;
+    glv.pack.vars.textureIndex = textureIndex;
+    glv.pack.vars.fullbright = v.param1 > 0.0f;
+    glv.pack.vars.rX = 0;
+    glv.pack.vars.rY = 0;
+    glv.pack.vars.unused = 0;
     ++currentVertexCount;
+    return glv;
   };
 
   float textureIndex = 0.0f;
@@ -765,7 +774,6 @@ void OpenGlRenderer::uploadTextureImage(PixelFormat pixelFormat, Vec2U size, uin
   else
 	throw RendererException("Unsupported texture format in OpenGL20Renderer::uploadTextureImage");
 
-
   glTexImage2D(GL_TEXTURE_2D, 0, internalFormat.value(format), size[0], size[1], 0, format, type, data);
 }
 
@@ -807,7 +815,6 @@ auto OpenGlRenderer::createGlTexture(ImageView const& image, TextureAddressing a
     glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   }
 
-
   if (!image.empty())
     uploadTextureImage(image.format, image.size, image.data);
 
@@ -822,6 +829,7 @@ auto OpenGlRenderer::createGlRenderBuffer() -> shared_ptr<GlRenderBuffer> {
 }
 
 void OpenGlRenderer::renderGlBuffer(GlRenderBuffer const& renderBuffer, Mat3F const& transformation) {
+
   for (auto const& vb : renderBuffer.vertexBuffers) {
     glUniformMatrix3fv(m_vertexTransformUniform, 1, GL_TRUE, transformation.ptr());
 
@@ -842,18 +850,13 @@ void OpenGlRenderer::renderGlBuffer(GlRenderBuffer const& renderBuffer, Mat3F co
 
     glEnableVertexAttribArray(m_positionAttribute);
     glEnableVertexAttribArray(m_texCoordAttribute);
-    glEnableVertexAttribArray(m_texIndexAttribute);
     glEnableVertexAttribArray(m_colorAttribute);
+    glEnableVertexAttribArray(m_dataAttribute);
 
-    glVertexAttribPointer(m_positionAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, screenCoordinate));
-    glVertexAttribPointer(m_texCoordAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, textureCoordinate));
-    glVertexAttribPointer(m_texIndexAttribute, 1, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, textureIndex));
+    glVertexAttribPointer(m_positionAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, pos));
+    glVertexAttribPointer(m_texCoordAttribute, 2, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, uv));
     glVertexAttribPointer(m_colorAttribute, 4, GL_UNSIGNED_BYTE, GL_TRUE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, color));
-
-    if (m_param1Attribute != -1) {
-      glEnableVertexAttribArray(m_param1Attribute);
-      glVertexAttribPointer(m_param1Attribute, 1, GL_FLOAT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, param1));
-    }
+    glVertexAttribPointer(m_dataAttribute, 1, GL_INT, GL_FALSE, sizeof(GlRenderVertex), (GLvoid*)offsetof(GlRenderVertex, pack));
 
     glDrawArrays(GL_TRIANGLES, 0, vb.vertexCount);
   }
@@ -862,10 +865,9 @@ void OpenGlRenderer::renderGlBuffer(GlRenderBuffer const& renderBuffer, Mat3F co
 //Assumes the passed effect program is currently in use.
 void OpenGlRenderer::setupGlUniforms(Effect& effect) {
   m_positionAttribute = effect.getAttribute("vertexPosition");
-  m_texCoordAttribute = effect.getAttribute("vertexTextureCoordinate");
-  m_texIndexAttribute = effect.getAttribute("vertexTextureIndex");
   m_colorAttribute = effect.getAttribute("vertexColor");
-  m_param1Attribute = effect.getAttribute("vertexParam1");
+  m_texCoordAttribute = effect.getAttribute("vertexTextureCoordinate");
+  m_dataAttribute = effect.getAttribute("vertexData");
 
   m_textureUniforms.clear();
   m_textureSizeUniforms.clear();

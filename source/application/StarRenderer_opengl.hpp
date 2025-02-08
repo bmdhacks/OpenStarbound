@@ -26,9 +26,9 @@ public:
 
   void setScissorRect(Maybe<RectI> const& scissorRect) override;
 
-  void setEffectScriptableParameter(String const& effectName, String const& parameterName, RenderEffectParameter const& parameter);
-  Maybe<RenderEffectParameter> getEffectScriptableParameter(String const& effectName, String const& parameterName);
-  Maybe<VariantTypeIndex> getEffectScriptableParameterType(String const& effectName, String const& parameterName);
+  void setEffectScriptableParameter(String const& effectName, String const& parameterName, RenderEffectParameter const& parameter) override;
+  Maybe<RenderEffectParameter> getEffectScriptableParameter(String const& effectName, String const& parameterName) override;
+  Maybe<VariantTypeIndex> getEffectScriptableParameterType(String const& effectName, String const& parameterName) override;
 
   bool switchEffectConfig(String const& name) override;
 
@@ -113,12 +113,22 @@ private:
     TextureFiltering textureFiltering = TextureFiltering::Nearest;
   };
 
+  struct GlPackedVertexData {
+    uint8_t textureIndex : 2;
+    uint8_t fullbright : 1;
+    uint8_t rX : 1;
+    uint8_t rY : 1;
+    uint32_t unused : 27;
+  };
+
   struct GlRenderVertex {
-    Vec2F screenCoordinate;
-    Vec2F textureCoordinate;
-    float textureIndex;
+    Vec2F pos;
+    Vec2F uv;
     Vec4B color;
-    float param1;
+    union Packed {
+      uint32_t packed;
+      GlPackedVertexData vars;
+    } pack;
   };
 
   struct GlRenderBuffer : public RenderBuffer {
@@ -194,11 +204,9 @@ private:
   GLuint m_program = 0;
 
   GLint m_positionAttribute = -1;
-  GLint m_texCoordAttribute = -1;
-  GLint m_texIndexAttribute = -1;
   GLint m_colorAttribute = -1;
-  GLint m_param1Attribute = -1;
-
+  GLint m_texCoordAttribute = -1;
+  GLint m_dataAttribute = -1;
   List<GLint> m_textureUniforms = {};
   List<GLint> m_textureSizeUniforms = {};
   GLint m_screenSizeUniform = -1;

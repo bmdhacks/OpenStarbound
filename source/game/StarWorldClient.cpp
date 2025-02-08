@@ -36,7 +36,7 @@ WorldClient::WorldClient(PlayerPtr mainPlayer, LuaRootPtr luaRoot) {
 
   m_currentStep = 0;
   m_currentTime = 0;
-  m_fullBright = true;
+  m_fullBright = false;
   m_asyncLighting = false;
   m_worldDimTimer = GameTimer(m_clientConfig.getFloat("worldDimTime"));
   m_worldDimTimer.setDone();
@@ -1414,7 +1414,7 @@ bool WorldClient::waitForLighting(WorldRenderData* renderData) {
         Vec2I lightArrayPos = m_geometry.diff(previewTile.position, m_lightMinPosition);
         if (lightArrayPos[0] >= 0 && lightArrayPos[0] < (int)m_lightMap.width()
          && lightArrayPos[1] >= 0 && lightArrayPos[1] < (int)m_lightMap.height())
-          m_lightMap.set(lightArrayPos[0], lightArrayPos[1], Color::v3bToFloat(previewTile.light));
+          m_lightMap.set(lightArrayPos[0], lightArrayPos[1], previewTile.light);
       }
     }
     renderData->lightMap = std::move(m_lightMap);

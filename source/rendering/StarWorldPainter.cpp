@@ -78,7 +78,7 @@ void WorldPainter::render(WorldRenderData& renderData, function<bool()> lightWai
 
   bool lightMapUpdated = lightWaiter ? lightWaiter() : false;
 
-  m_renderer->setEffectParameter("lightMapEnabled", !renderData.isFullbright);
+  m_renderer->setEffectParameter("lightMapEnabled", renderData.isFullbright ? 0.0f : 1.0f);
   if (renderData.isFullbright) {
     m_renderer->setEffectTexture("lightMap", Image::filled(Vec2U(1, 1), { 255, 255, 255, 255 }, PixelFormat::RGB24));
     m_renderer->setEffectParameter("lightMapMultiplier", 1.0f);

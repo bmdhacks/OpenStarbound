@@ -29,7 +29,7 @@ TilePainter::TilePainter(RendererPtr renderer) : TileDrawer() {
     m_liquids.set(liquid->id, LiquidInfo{
         m_renderer->createTexture(*assets->image(liquid->config.getString("texture")), TextureAddressing::Wrap),
         jsonToColor(liquid->config.get("color")).toRgba(),
-        jsonToColor(liquid->config.get("bottomLightMix")).toRgbF(),
+        jsonToColor(liquid->config.get("bottomLightMix")).toRgb(),
         liquid->config.getFloat("textureMovementFactor")
       });
   }
@@ -44,11 +44,11 @@ void TilePainter::adjustLighting(WorldRenderData& renderData) const {
         return;
 
       auto lightIndex = Vec2U(pos - renderData.lightMinPosition);
-      auto lightValue = renderData.lightMap.get(lightIndex.x(), lightIndex.y());
+      auto lightValue = renderData.lightMap.get24(lightIndex.x(), lightIndex.y());
 
       auto const& liquid = m_liquids[tile.liquidId];
-      float darknessLevel = (1.f - (lightValue.sum() / 3.0f)) * drawLevel;
-      lightValue = lightValue.piecewiseMultiply(Vec3F::filled(1.f - darknessLevel) + liquid.bottomLightMix * darknessLevel);
+      uint8_t darknessLevel = (UINT8_MAX - (lightValue.sum() / 3)) * (drawLevel * UINT8_MAX);
+      lightValue = lightValue.piecewiseMultiply(Vec3B::filled(UINT8_MAX - darknessLevel) + liquid.bottomLightMix * darknessLevel);
 
       renderData.lightMap.set(lightIndex.x(), lightIndex.y(), lightValue);
     });

@@ -55,7 +55,7 @@ private:
   struct LiquidInfo {
     TexturePtr texture;
     Vec4B color;
-    Vec3F bottomLightMix;
+    Vec3B bottomLightMix;
     float textureMovementFactor;
   };
 
