@@ -7,6 +7,7 @@
 #include "StarAssets.hpp"
 #include "StarRoot.hpp"
 #include "StarTileDrawer.hpp"
+#include <cstdint>
 
 namespace Star {
 
@@ -38,20 +39,30 @@ TilePainter::TilePainter(RendererPtr renderer) : TileDrawer() {
 void TilePainter::adjustLighting(WorldRenderData& renderData) const {
   RectI lightRange = RectI::withSize(renderData.lightMinPosition, Vec2I(renderData.lightMap.size()));
   forEachRenderTile(renderData, lightRange, [&](Vec2I const& pos, RenderTile const& tile) {
-      // Only adjust lighting for tiles with liquid above the draw threshold
-      float drawLevel = liquidDrawLevel(byteToFloat(tile.liquidLevel));
-      if (drawLevel == 0.0f)
-        return;
+    // Only adjust lighting for tiles with liquid above the draw threshold
+    if (tile.liquidLevel == 0)
+      return;
+    
+    auto lightIndex = Vec2U(pos - renderData.lightMinPosition);
+    Vec3B lightValue = renderData.lightMap.get24(lightIndex.x(), lightIndex.y());
+    auto const& liquid = m_liquids[tile.liquidId];
 
-      auto lightIndex = Vec2U(pos - renderData.lightMinPosition);
-      auto lightValue = renderData.lightMap.get24(lightIndex.x(), lightIndex.y());
+    // Convert to Vec3I to prevent overflow
+    Vec3I lightValueInt(lightValue[0], lightValue[1], lightValue[2]);
+    int darknessLevel = static_cast<int>(UINT8_MAX - (lightValueInt.sum() / 3)) * tile.liquidLevel / UINT8_MAX;
+    Vec3I bottomInt(liquid.bottomLightMix[0], liquid.bottomLightMix[1], liquid.bottomLightMix[2]);
 
-      auto const& liquid = m_liquids[tile.liquidId];
-      uint8_t darknessLevel = (UINT8_MAX - (lightValue.sum() / 3)) * (drawLevel * UINT8_MAX);
-      lightValue = lightValue.piecewiseMultiply(Vec3B::filled(UINT8_MAX - darknessLevel) + liquid.bottomLightMix * darknessLevel);
+    // Perform calculations in Vec3I
+    auto term = bottomInt * darknessLevel / UINT8_MAX;
+    auto factor = Vec3I::filled(UINT8_MAX - darknessLevel) + term;
+    lightValueInt = lightValueInt.piecewiseMultiply(factor) / UINT8_MAX;
 
-      renderData.lightMap.set(lightIndex.x(), lightIndex.y(), lightValue);
-    });
+    // Clamp to valid range and convert back to Vec3B
+    lightValueInt = lightValueInt.piecewiseClamp(Vec3I(0,0,0), Vec3I(255, 255, 255));
+    lightValue = Vec3B(static_cast<uint8_t>(lightValueInt[0]), static_cast<uint8_t>(lightValueInt[1]), static_cast<uint8_t>(lightValueInt[2]));
+
+    renderData.lightMap.set(lightIndex.x(), lightIndex.y(), lightValue);
+  });
 }
 
 void TilePainter::setup(WorldCamera const& camera, WorldRenderData& renderData) {
