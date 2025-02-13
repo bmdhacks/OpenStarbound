@@ -278,7 +278,6 @@ private:
 
   IODevicePtr open(String const& basePath) const;
   ByteArray read(String const& basePath) const;
-  IODevicePtr mmap(String const& basePath) const;
   ImageConstPtr readImage(String const& path) const;
 
   Json readJson(String const& basePath) const;

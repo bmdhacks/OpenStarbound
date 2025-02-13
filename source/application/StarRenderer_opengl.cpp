@@ -695,6 +695,7 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
 
   float textureIndex = 0.0f;
   Vec2F textureOffset = {};
+  currentTextures.clear();
   for (auto& primitive : primitives) {
     if (auto tri = primitive.ptr<RenderTriangle>()) {
       tie(textureIndex, textureOffset) = addCurrentTexture(std::move(tri->texture));

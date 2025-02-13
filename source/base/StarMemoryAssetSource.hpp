@@ -26,7 +26,6 @@ public:
   void set(String const& path, Image const& image);
   void set(String const& path, Image&& image);
   ByteArray read(String const& path) override;
-  ByteArray mmap(String const& path) override;
   ImageConstPtr image(String const& path);
 private:
   typedef Variant<ByteArray, ImagePtr> FileEntry;

@@ -24,8 +24,6 @@ public:
   // Same, but includes the trailing '\0'
   static ByteArray fromCStringWithNull(char const* str);
   
-  // mmap from file saves memory space over reading
-  static ByteArray fromMMap(const char* path, size_t offset = 0, size_t length = -1);
 
   static ByteArray withReserve(size_t capacity);
   
@@ -120,11 +118,7 @@ private:
   size_t m_capacity;
   size_t m_size;
 
-  // Mmap-specific metadata
-  void* m_mapped_addr;     // Original aligned address from mmap
-  size_t m_mapped_len;  // Full length of the mmap region
-  enum class AllocationType { Heap, Mapped };
-  AllocationType m_allocation = AllocationType::Heap;
+
 };
 
 template <>

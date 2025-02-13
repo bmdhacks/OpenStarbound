@@ -18,7 +18,6 @@ public:
 
   IODevicePtr open(String const& path) override;
   ByteArray read(String const& path) override;
-  ByteArray mmap(String const& path) override;
 
   // Converts an asset path to the path on the filesystem
   String toFilesystem(String const& path) const;

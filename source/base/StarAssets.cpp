@@ -918,14 +918,6 @@ ByteArray Assets::read(String const& path) const {
   throw AssetException(strf("No such asset '{}'", path));
 }
 
-IODevicePtr Assets::mmap(String const& path) const {
-  if (auto p = m_files.ptr(path)) {
-    ByteArray ba = p->source->mmap(p->sourceName);
-    return make_shared<Buffer>(ba);
-  }
-  throw AssetException(strf("No such asset '{}'", path));
-}
-
 ImageConstPtr Assets::readImage(String const& path) const {
   if (auto p = m_files.ptr(path)) {
     ImageConstPtr image;
@@ -1278,7 +1270,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
 shared_ptr<Assets::AssetData> Assets::loadAudio(AssetPath const& path) const {
   return unlockDuring([&]() {
     auto newData = make_shared<AudioData>();
-    newData->audio = make_shared<Audio>(mmap(path.basePath), path.basePath);
+    newData->audio = make_shared<Audio>(open(path.basePath), path.basePath);
     newData->needsPostProcessing = newData->audio->compressed();
     return newData;
   });
