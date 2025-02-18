@@ -33,6 +33,9 @@ GuiContext::GuiContext(MixerPtr mixer, ApplicationControllerPtr appController) {
 
   m_shiftHeld = false;
 
+  m_lastCursor = {};
+  m_lastCursorPath = {};
+
   refreshKeybindings();
 }
 
@@ -315,9 +318,15 @@ bool GuiContext::trySetCursor(Drawable const& drawable, Vec2I const& offset, int
   if (!drawable.isImage())
     return false;
 
-  auto assets = Root::singleton().assets();
   auto& imagePath = drawable.imagePart().image;
-  return applicationController()->setCursorImage(AssetPath::join(imagePath), assets->image(imagePath), pixelRatio, offset);
+  if (m_lastCursorPath == imagePath && m_lastCursor) {
+    return applicationController()->setCursorImage(AssetPath::join(imagePath), m_lastCursor, pixelRatio, offset);
+  }
+
+  auto assets = Root::singleton().assets();
+  m_lastCursorPath = imagePath;
+  m_lastCursor = assets->image(imagePath);
+  return applicationController()->setCursorImage(AssetPath::join(imagePath), m_lastCursor, pixelRatio, offset);
 }
 
 RectF GuiContext::renderText(String const& s, TextPositioning const& position) {

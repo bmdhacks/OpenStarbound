@@ -146,6 +146,10 @@ private:
   int m_interfaceScale;
 
   bool m_shiftHeld;
+
+  // retain the cursor instead of loading it every frame
+  ImageConstPtr m_lastCursor;
+  AssetPath m_lastCursorPath;
 };
 
 }
