@@ -17,15 +17,14 @@ void IODevice::resize(StreamOffset) {
 }
 
 void IODevice::readFull(char* data, size_t len) {
-  size_t r = read(data, len);
-  if (r < len) {
-    if (atEnd())
-      throw EofException("Failed to read full buffer in readFull, eof reached.");
-    else
-      throw IOException("Failed to read full buffer in readFull");
+  while (len > 0) {
+    size_t r = read(data, len);
+    if (r == 0) { // Reached EOF before completing the read
+      throw EofException("Failed to read full buffer in looping readFull, eof reached.");
+    }
+    data += r;
+    len -= r;
   }
-  data += r;
-  len -= r;
 }
 
 void IODevice::writeFull(char const* data, size_t len) {
