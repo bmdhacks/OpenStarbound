@@ -92,20 +92,6 @@ void LocalPacketSocket::sendPackets(List<PacketPtr> packets) {
 
   if (auto outgoingPipe = m_outgoingPipe.lock()) {
     MutexLocker locker(outgoingPipe->mutex);
-
-#ifdef STAR_DEBUG
-    // Test serialization if STAR_DEBUG is enabled
-    DataStreamBuffer buffer;
-    for (auto inPacket : take(packets)) {
-      buffer.clear();
-      inPacket->write(buffer);
-      auto outPacket = createPacket(inPacket->type());
-      buffer.seek(0);
-      outPacket->read(buffer);
-      packets.append(outPacket);
-    }
-#endif
-
     outgoingPipe->queue.appendAll(std::move(packets));
   }
 }
