@@ -23,6 +23,7 @@
 #include "StarLua.hpp"
 #include "StarImageLuaBindings.hpp"
 #include "StarUtilityLuaBindings.hpp"
+#include <type_traits>
 
 namespace Star {
 
@@ -439,7 +440,6 @@ CaseInsensitiveStringSet const& Assets::scanExtension(String const& extension) c
 Json Assets::json(String const& path) const {
   auto components = AssetPath::split(path);
   validatePath(components, true, false);
-
   return as<JsonData>(getAsset(AssetId{AssetType::Json, std::move(components)}))->json;
 }
 
@@ -561,6 +561,10 @@ ByteArrayConstPtr Assets::bytes(String const& path) const {
 
 IODevicePtr Assets::openFile(String const& path) const {
   return open(path);
+}
+
+void Assets::setCaching(bool onoff) const {
+  m_doCaching = onoff;
 }
 
 void Assets::clearCache() {
@@ -734,7 +738,7 @@ void Assets::queueAsset(AssetId const& assetId) const {
   } else {
     auto j = m_queue.find(assetId);
     if (j == m_queue.end()) {
-      m_queue[assetId] = QueuePriority::Load;
+      m_queue[assetId].priority = QueuePriority::Load;
       m_assetsQueued.signal();
     }
   }
@@ -743,44 +747,90 @@ void Assets::queueAsset(AssetId const& assetId) const {
 shared_ptr<Assets::AssetData> Assets::tryAsset(AssetId const& id) const {
   MutexLocker assetsLocker(m_assetsMutex);
 
-  auto i = m_assetsCache.find(id);
-  if (i != m_assetsCache.end()) {
-    if (i->second) {
-      freshen(i->second);
-      return i->second;
-    } else {
-      throw AssetException::format("Error loading asset {}", id.path);
+  // if it's in the cache just return it
+  if (auto cached = m_assetsCache.find(id); cached != m_assetsCache.end()) {
+    if (cached->second) {
+      freshen(cached->second);
+      return cached->second;
     }
-  } else {
-    auto j = m_queue.find(id);
-    if (j == m_queue.end()) {
-      m_queue[id] = QueuePriority::Load;
-      m_assetsQueued.signal();
-    }
-    return {};
   }
+
+  if (id.path.subPath || !id.path.directives.empty()) {
+    // if some part of this asset is cached let's reconstitute the whole thing
+    AssetId baseId = {id.type, {id.path.basePath, {}, {}}};
+    if (auto cached = m_assetsCache.find(baseId); cached != m_assetsCache.end()) {
+      return loadAsset(id);
+    }
+  }
+
+  // put it into the queue to load then
+  auto j = m_queue.find(id);
+  if (j == m_queue.end()) {
+    m_queue[id].priority = QueuePriority::Load;
+    m_assetsQueued.signal();
+  }
+  else {
+    Logger::info("Asset {} is already in the queue with priority {}", id.path, (int)m_queue[id].priority);
+  }
+  return {};
+}
+
+shared_ptr<Assets::AssetData> Assets::handoffAsset(AssetId const& id) const {
+  // The m_assetsMutex should already be locked when this is called
+  
+  auto queueEntry = m_queue.find(id);
+  if (queueEntry != m_queue.end()) {
+    // it's in the queue
+    if (queueEntry->second.priority == QueuePriority::Handoff) {
+      // If we find a handoff entry, move the asset data out and remove the queue entry
+      auto assetData = std::move(queueEntry->second.assetData);
+      m_queue.remove(id);
+      return assetData;
+    } else {
+      // still working I guess
+      return nullptr;
+    }
+  }
+
+  // Last ditch effort look in the cache?
+  if (auto cached = m_assetsCache.find(id); cached != m_assetsCache.end()) {
+    if (cached->second) {
+      freshen(cached->second);
+      return cached->second;
+    }
+  }
+  
+  // couldn't find it!?!
+  throw AssetException::format("Problem handing off loaded asset {}", id.path);
 }
 
 shared_ptr<Assets::AssetData> Assets::getAsset(AssetId const& id) const {
   MutexLocker assetsLocker(m_assetsMutex);
+  shared_ptr<Assets::AssetData> asset = {};
 
-  while (true) {
-    auto j = m_assetsCache.find(id);
-    if (j != m_assetsCache.end()) {
-      if (j->second) {
-        auto asset = j->second;
-        freshen(asset);
-        return asset;
-      } else {
-        throw AssetException::format("Error loading asset {}", id.path);
-      }
+  auto j = m_assetsCache.find(id);
+  if (j != m_assetsCache.end()) {
+    if (j->second) {
+      asset = j->second;
+      freshen(asset);
+      return asset;
     } else {
-      // Try to load the asset in-thread, if we cannot, then the asset has been
-      // queued so wait for a worker thread to finish it.
-      if (!doLoad(id))
-        m_assetsDone.wait(m_assetsMutex);
+      throw AssetException::format("Error loading asset {}", id.path);
     }
   }
+
+  // Try to load the asset in-thread, if we cannot, then the asset has been
+  // queued so wait for a worker thread to finish it.
+  asset = doLoad(id, shouldCache(id));
+  
+  while (!asset) {
+    asset=handoffAsset(id);  // check here before waiting
+    if (!asset) {
+      m_assetsDone.wait(m_assetsMutex);
+    }
+  }
+
+  return asset;
 }
 
 void Assets::workerMain() {
@@ -797,32 +847,35 @@ void Assets::workerMain() {
 
     AssetId assetId;
     QueuePriority queuePriority = QueuePriority::None;
+    bool doCache = true;
 
     // Find the highest priority queue entry
     for (auto const& pair : m_queue) {
-      if (pair.second == QueuePriority::Load || pair.second == QueuePriority::PostProcess) {
+      if (pair.second.priority == QueuePriority::Load) {
         assetId = pair.first;
-        queuePriority = pair.second;
-        if (pair.second == QueuePriority::Load)
-          break;
+        queuePriority = pair.second.priority;
+        doCache = pair.second.doCache;
+        break;
       }
     }
 
-    if (queuePriority != QueuePriority::Load && queuePriority != QueuePriority::PostProcess) {
+    if (queuePriority != QueuePriority::Load) {
       // Nothing in the queue that needs work
       m_assetsQueued.wait(m_assetsMutex);
       continue;
     }
 
-    bool workIsBlocking;
-    if (queuePriority == QueuePriority::PostProcess)
-      workIsBlocking = !doPost(assetId);
-    else
-      workIsBlocking = !doLoad(assetId);
-
-    if (workIsBlocking) {
+    auto asset = doLoad(assetId, doCache);
+    if (asset) {
+      m_queue[assetId].priority = QueuePriority::Handoff;
+      m_queue[assetId].assetData = std::move(asset);
+      m_assetsDone.broadcast();
+    }
+    else {
       // We are blocking on some sort of busy asset, so need to wait on
       // something to complete here, rather than spinning and burning cpu.
+      Logger::info("Asset {}:{} didn't load so waiting.  Current proirity is: {}", assetId.path.basePath, assetId.path.subPath, (int)m_queue[assetId].priority);
+      assetsLocker.unlock();
       m_assetsDone.wait(m_assetsMutex);
       continue;
     }
@@ -1043,12 +1096,11 @@ Json Assets::readJson(String const& path) const {
   }
 }
 
-
-bool Assets::doLoad(AssetId const& id) const {
+shared_ptr<Assets::AssetData> Assets::doLoad(AssetId const& id, bool doCache) const {
   try {
     // loadAsset automatically manages the queue and freshens the asset
     // data.
-    return (bool)loadAsset(id);
+    return loadAsset(id, doCache);
   } catch (std::exception const& e) {
     Logger::error("Exception caught loading asset: {}, {}", id.path, outputException(e, true));
   } catch (...) {
@@ -1059,42 +1111,17 @@ bool Assets::doLoad(AssetId const& id) const {
   // with null so that getAsset will throw.
   m_assetsCache[id] = {};
   m_assetsDone.broadcast();
-  m_queue.remove(id);
-  return true;
+  m_queue.remove(id);  // nuclear option
+  return {};
 }
 
-bool Assets::doPost(AssetId const& id) const {
-  shared_ptr<AssetData> assetData;
-  try {
-    assetData = m_assetsCache.get(id);
-    if (id.type == AssetType::Audio)
-      assetData = postProcessAudio(assetData);
-  } catch (std::exception const& e) {
-    Logger::error("Exception caught post-processing asset: {}, {}", id.path, outputException(e, true));
-  } catch (...) {
-    Logger::error("Unknown exception caught post-processing asset: {}", id.path);
-  }
-
-  m_queue.remove(id);
-  if (assetData) {
-    assetData->needsPostProcessing = false;
-    m_assetsCache[id] = assetData;
-    freshen(assetData);
-    m_assetsDone.broadcast();
-  }
-
-  return true;
-}
-
-shared_ptr<Assets::AssetData> Assets::loadAsset(AssetId const& id) const {
-  if (auto asset = m_assetsCache.value(id))
+shared_ptr<Assets::AssetData> Assets::loadAsset(AssetId const& id, bool doCache) const {
+  if (auto asset = m_assetsCache.value(id)) {
+    freshen(asset);
     return asset;
-
-  if (m_queue.value(id, QueuePriority::None) == QueuePriority::Working)
-    return {};
+  }
 
   try {
-    m_queue[id] = QueuePriority::Working;
     shared_ptr<AssetData> assetData;
 
     try {
@@ -1122,22 +1149,19 @@ shared_ptr<Assets::AssetData> Assets::loadAsset(AssetId const& id) const {
       }
     }
 
-    if (assetData) {
-      if (assetData->needsPostProcessing)
-        m_queue[id] = QueuePriority::PostProcess;
-      else
-        m_queue.remove(id);
-      m_assetsCache[id] = assetData;
-      m_assetsDone.broadcast();
-      freshen(assetData);
-
-    } else {
+    if (!assetData) {
       // We have failed to load an asset because it depends on an asset
       // currently being worked on.  Mark it as needing loading and move it to
       // the end of the queue.
-      m_queue[id] = QueuePriority::Load;
+      Logger::info("Asset {}:{} couldn't be loaded directly so we put it back in the queue", id.path.basePath, id.path.subPath);
+      m_queue[id] = {QueuePriority::Load, {}, doCache};
       m_assetsQueued.signal();
       m_queue.toBack(id);
+    }
+
+    if (doCache && m_doCaching) {
+      m_assetsCache[id] = assetData;
+      freshen(assetData);
     }
 
     return assetData;
@@ -1182,10 +1206,11 @@ shared_ptr<Assets::AssetData> Assets::loadJson(AssetPath const& path) const {
 shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
   validatePath(path, true, true);
   if (!path.directives.empty()) {
-    shared_ptr<ImageData> source =
-        as<ImageData>(loadAsset(AssetId{AssetType::Image, {path.basePath, path.subPath, {}}}));
+    auto parentId = AssetId{AssetType::Image, {path.basePath, path.subPath, {}}};
+    shared_ptr<ImageData> source = as<ImageData>(loadAsset(parentId, true));
     if (!source)
       return {};
+
     StringMap<ImageConstPtr> references;
     StringList referencePaths;
 
@@ -1196,11 +1221,10 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
       addImageOperationReferences(entry.operation, referencePaths);
     }); // TODO: This can definitely be better, was changed quickly to support the new Directives.
 
-
     for (auto const& ref : referencePaths) {
       auto components = AssetPath::split(ref);
       validatePath(components, true, false);
-      auto refImage = as<ImageData>(loadAsset(AssetId{AssetType::Image, std::move(components)}));
+      auto refImage = as<ImageData>(loadAsset(AssetId{AssetType::Image, std::move(components)}, true));
       if (!refImage)
         return {};
       references[ref] = refImage->image;
@@ -1223,18 +1247,32 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
     });
 
   } else if (path.subPath) {
-    auto imageData = as<ImageData>(loadAsset(AssetId{AssetType::Image, {path.basePath, {}, {}}}));
+    auto parentId = AssetId{AssetType::Image, {path.basePath, {}, {}}};
+    auto imageData = as<ImageData>(loadAsset(parentId, true));
     if (!imageData)
       return {};
+
+    // cache the master sheet
+    if (m_doCaching) {
+      m_assetsCache[parentId]=imageData;
+      freshen(imageData);
+    }
 
     // Base image must have frames data associated with it.
     if (!imageData->frames)
       throw AssetException::format("No associated frames file found for image '{}' while resolving image frame '{}'", path.basePath, path);
 
     if (auto alias = imageData->frames->aliases.ptr(*path.subPath)) {
-      imageData = as<ImageData>(loadAsset(AssetId{AssetType::Image, {path.basePath, *alias, path.directives}}));
+      auto aliasId = AssetId{AssetType::Image, {path.basePath, *alias, path.directives}};
+      auto imageData = as<ImageData>(loadAsset(aliasId, true));
       if (!imageData)
         return {};
+
+      // cache the alias
+      if (m_doCaching) {
+        m_assetsCache[aliasId]=imageData;
+        freshen(imageData);
+      }
 
       auto newData = make_shared<ImageData>();
       newData->image = imageData->image;
@@ -1271,8 +1309,7 @@ shared_ptr<Assets::AssetData> Assets::loadAudio(AssetPath const& path) const {
   return unlockDuring([&]() {
     auto newData = make_shared<AudioData>();
     newData->audio = make_shared<Audio>(open(path.basePath), path.basePath);
-    newData->needsPostProcessing = newData->audio->compressed();
-    return newData;
+    return postProcessAudio(newData);
   });
 }
 
@@ -1292,23 +1329,29 @@ shared_ptr<Assets::AssetData> Assets::loadBytes(AssetPath const& path) const {
   });
 }
 
-shared_ptr<Assets::AssetData> Assets::postProcessAudio(shared_ptr<AssetData> const& original) const {
-  return unlockDuring([&]() -> shared_ptr<AssetData> {
-    if (auto audioData = as<AudioData>(original)) {
-      if (audioData->audio->totalTime() < m_settings.audioDecompressLimit) {
-        auto audio = make_shared<Audio>(*audioData->audio);
-        audio->uncompress();
+bool Assets::shouldCache(AssetId const& id) const {
+  // don't cache objects that have been derived from other objects
+  if ((id.type == AssetType::Image || id.type == AssetType::Json) && (id.path.subPath || id.path.directives)) {
+    return false;
+  }
+  return true;
+}
 
-        auto newData = make_shared<AudioData>();
-        newData->audio = audio;
-        return newData;
-      } else {
-        return audioData;
-      }
+shared_ptr<Assets::AssetData> Assets::postProcessAudio(shared_ptr<AssetData> const& original) const {
+  if (auto audioData = as<AudioData>(original)) {
+    if (audioData->audio->compressed() && audioData->audio->totalTime() < m_settings.audioDecompressLimit) {
+      auto audio = make_shared<Audio>(*audioData->audio);
+      audio->uncompress();
+      
+      auto newData = make_shared<AudioData>();
+      newData->audio = audio;
+      return newData;
     } else {
-      return {};
+      return audioData;
     }
-  });
+  } else {
+    return {};
+  }
 }
 
 void Assets::freshen(shared_ptr<AssetData> const& asset) const {

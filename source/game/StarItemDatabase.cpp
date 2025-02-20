@@ -661,12 +661,16 @@ void ItemDatabase::scanItems() {
 void ItemDatabase::addObjectItems() {
   auto objectDatabase = Root::singleton().objectDatabase();
 
+  Root::singleton().assets()->setCaching(false);
+
   for (auto const& objectName : objectDatabase->allObjects()) {
     auto objectConfig = objectDatabase->getConfig(objectName);
 
     if (objectConfig->hasObjectItem)
       addObjectDropItem(objectConfig->path, objectConfig->config);
   }
+
+  Root::singleton().assets()->setCaching(true);
 }
 
 void ItemDatabase::scanRecipes() {

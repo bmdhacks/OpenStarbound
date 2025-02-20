@@ -71,7 +71,7 @@ public:
     StringList digestIgnore;
   };
 
-    enum class AssetType {
+  enum class AssetType {
     Json,
     Image,
     Audio,
@@ -82,8 +82,8 @@ public:
   enum class QueuePriority {
     None,
     Working,
-    PostProcess,
-    Load
+    Load,
+    Handoff
   };
 
   struct AssetId {
@@ -106,13 +106,19 @@ public:
     virtual bool shouldPersist() const = 0;
 
     double time = 0.0;
-    bool needsPostProcessing = false;
   };
 
   struct JsonData : AssetData {
     bool shouldPersist() const override;
 
     Json json;
+  };
+
+  // This should be used to hand off asset data to getAsset
+  struct QueueEntry {
+    QueuePriority priority;
+    shared_ptr<AssetData> assetData;
+    bool doCache = true;
   };
 
   // Image data for an image, sub-frame, or post-processed image.
@@ -248,6 +254,9 @@ public:
   // Bypass asset caching and open an asset file directly.
   IODevicePtr openFile(String const& basePath) const;
 
+  // Turn caching on or off
+  void setCaching(bool onoff) const;
+
   // Clear all cached assets that are not queued, persistent, or broken.
   void clearCache();
 
@@ -262,6 +271,7 @@ private:
   void queueAsset(AssetId const& assetId) const;
   shared_ptr<AssetData> tryAsset(AssetId const& id) const;
   shared_ptr<AssetData> getAsset(AssetId const& id) const;
+  shared_ptr<AssetData> handoffAsset(AssetId const& id) const;
 
   void workerMain();
 
@@ -283,18 +293,16 @@ private:
   Json readJson(String const& basePath) const;
   Json checkPatchArray(String const& path, AssetSourcePtr const& source, Json const result, JsonArray const patchData, Maybe<Json> const external) const;
 
-  // Load / post process an asset and log any exception.  Returns true if the
-  // work was performed (whether successful or not), false if the work is
-  // blocking on something.
-  bool doLoad(AssetId const& id) const;
-  bool doPost(AssetId const& id) const;
+  // the entry point for recursive loading.  Catches the exceptions and logs the error.
+  // A successful load should land the asset in the queue in the handoff state
+  shared_ptr<Assets::AssetData> doLoad(AssetId const& id, bool doCache) const;
 
   // Assets can recursively depend on other assets, so the main entry point for
   // loading assets is in this separate method, and is safe for other loading
   // methods to call recursively.  If there is an error loading the asset, this
   // method will throw.  If, and only if, the asset is blocking on another busy
   // asset, this method will return null.
-  shared_ptr<AssetData> loadAsset(AssetId const& id) const;
+  shared_ptr<AssetData> loadAsset(AssetId const& id, bool doCache=true) const;
 
   shared_ptr<AssetData> loadJson(AssetPath const& path) const;
   shared_ptr<AssetData> loadImage(AssetPath const& path) const;
@@ -304,6 +312,9 @@ private:
 
   shared_ptr<AssetData> postProcessAudio(shared_ptr<AssetData> const& original) const;
 
+  // heuristics for caching
+  bool shouldCache(AssetId const& id) const;
+
   // Updates time on the given asset (with smearing).
   void freshen(shared_ptr<AssetData> const& asset) const;
 
@@ -312,8 +323,9 @@ private:
   mutable Mutex m_assetsMutex;
 
   mutable ConditionVariable m_assetsQueued;
-  mutable OrderedHashMap<AssetId, QueuePriority, AssetIdHash> m_queue;
+  mutable OrderedHashMap<AssetId, QueueEntry, AssetIdHash> m_queue;
 
+  mutable bool m_doCaching=true;
   mutable ConditionVariable m_assetsDone;
   mutable HashMap<AssetId, shared_ptr<AssetData>, AssetIdHash> m_assetsCache;
 
