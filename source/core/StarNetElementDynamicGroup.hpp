@@ -61,7 +61,7 @@ private:
   typedef pair<ElementId, ByteArray> ElementAdditionType;
 
   strong_typedef(Empty, ElementReset);
-  strong_typedef_builtin(ElementRemovalType, ElementRemoval);
+  typedef uint32_t  ElementRemoval;
   strong_typedef(ElementAdditionType, ElementAddition);
 
   typedef Variant<ElementReset, ElementRemoval, ElementAddition> ElementChange;
@@ -315,6 +315,22 @@ void NetElementDynamicGroup<Element>::readyElement(ElementPtr const& element) {
     element->enableNetInterpolation(m_extrapolationHint);
   else
     element->disableNetInterpolation();
+}
+
+// Fix disambiguation on stream operators for ElementRemoval
+template <typename Element>
+DataStream& operator<<(DataStream& ds, typename NetElementDynamicGroup<Element>::ElementRemoval const& removal) {
+    // ElementRemoval is a strong_typedef_builtin around ElementRemovalType (uint32_t)
+    // So we need to write the underlying value directly using a specific method
+    ds.write<uint32_t>(removal.t);
+    return ds;
+}
+
+template <typename Element>
+DataStream& operator>>(DataStream& ds, typename NetElementDynamicGroup<Element>::ElementRemoval& removal) {
+    // Read directly into the underlying value using the specific read method for uint32_t
+    removal.t = ds.read<uint32_t>();
+    return ds;
 }
 
 }

@@ -59,7 +59,7 @@ struct MonsterVariant {
   float touchDamageMultiplier;
 
   Json touchDamageConfig;
-  StringMap<Json> animationDamageParts;
+  JsonObject animationDamageParts;
   Json statusSettings;
   Vec2F mouthOffset;
   Vec2F feetOffset;

@@ -104,7 +104,7 @@ void WorldServer::setReferenceClock(ClockPtr clock) {
 
 void WorldServer::initLua(UniverseServer* universe) {
   auto assets = Root::singleton().assets();
-  for (auto& p : assets->json("/worldserver.config:scriptContexts").toObject()) {
+  for (auto p : assets->json("/worldserver.config:scriptContexts").toObject()) {
     auto scriptComponent = make_shared<ScriptComponent>();
     scriptComponent->setScripts(jsonToStringList(p.second.toArray()));
     scriptComponent->addCallbacks("universe", LuaBindings::makeUniverseServerCallbacks(universe));
@@ -528,7 +528,7 @@ void WorldServer::handleIncomingPackets(ConnectionId clientId, List<PacketPtr> c
 
     } else if (auto updateWorldProperties = as<UpdateWorldPropertiesPacket>(packet)) {
       // Kae: Properties set to null (nil from Lua) should be erased instead of lingering around
-      for (auto& pair : updateWorldProperties->updatedProperties) {
+      for (auto pair : updateWorldProperties->updatedProperties) {
         if (pair.second.isNull())
           m_worldProperties.erase(pair.first);
         else
@@ -2198,11 +2198,11 @@ void WorldServer::setProperty(String const& propertyName, Json const& property) 
   bool missing = entry == m_worldProperties.end();
   if (missing ? !property.isNull() : property != entry->second) {
     if (missing) // property can't be null if we're doing this when missing is true
-      m_worldProperties.emplace(propertyName, property);
+      m_worldProperties[propertyName] =  property;
     else if (property.isNull())
       m_worldProperties.erase(entry);
     else
-      entry->second = property;
+      m_worldProperties.set(propertyName, property);
     for (auto const& pair : m_clientInfo)
       pair.second->outgoingPackets.append(make_shared<UpdateWorldPropertiesPacket>(JsonObject{ {propertyName, property} }));
   }

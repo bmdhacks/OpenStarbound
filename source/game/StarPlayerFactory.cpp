@@ -44,7 +44,7 @@ PlayerConfig::PlayerConfig(JsonObject const& cfg) {
 
   bodyMaterialKind = cfg.get("bodyMaterialKind").toString();
 
-  for (auto& p : cfg.get("genericScriptContexts").optObject().value(JsonObject()))
+  for (auto p : cfg.get("genericScriptContexts").optObject().value(JsonObject()))
     genericScriptContexts[p.first] = p.second.toString();
 }
 

@@ -24,7 +24,7 @@ ActiveItem::ActiveItem(Json const& config, String const& directory, Json const& 
   m_itemAnimator = NetworkedAnimator(animationConfig, directory);
   for (auto const& pair : instanceValue("animationParts", JsonObject()).iterateObject())
     m_itemAnimator.setPartTag(pair.first, "partImage", pair.second.toString());
-  m_scriptedAnimationParameters.reset(config.getObject("scriptedAnimationParameters", {}));
+  m_scriptedAnimationParameters.reset(config.getObject("scriptedAnimationParameters", {}).toStringMap());
 
   addNetElement(&m_itemAnimator);
   addNetElement(&m_holdingItem);

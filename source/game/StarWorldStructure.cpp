@@ -249,6 +249,12 @@ Json WorldStructure::store() const {
     };
   };
 
+  JsonObject flaggedBlocks;
+  flaggedBlocks.reserve(m_flaggedBlocks.size());
+  for (auto kv : m_flaggedBlocks) {
+    flaggedBlocks.insert(kv.first, kv.second.transformed(jsonFromVec2I));
+  }
+
   return JsonObject{{"region", jsonFromRectI(m_region)},
       {"anchorPosition", jsonFromVec2I(m_anchorPosition)},
       {"config", m_config},
@@ -257,11 +263,7 @@ Json WorldStructure::store() const {
       {"backgroundBlocks", m_backgroundBlocks.transformed(blockToJson)},
       {"foregroundBlocks", m_foregroundBlocks.transformed(blockToJson)},
       {"objects", m_objects.transformed(objectToJson)},
-      {"flaggedBlocks",
-          transform<JsonObject>(m_flaggedBlocks,
-              [](pair<String, List<Vec2I>> const& p) {
-                return pair<String, Json>(p.first, p.second.transformed(jsonFromVec2I));
-              })}};
+      {"flaggedBlocks", flaggedBlocks}};
 }
 
 }

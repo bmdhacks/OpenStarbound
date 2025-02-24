@@ -22,9 +22,10 @@ void Statistics::writeStatistics() {
   auto versioningDatabase = Root::singleton().versioningDatabase();
   String filename = File::relativeTo(m_storageDirectory, "statistics");
 
-  Json stats = JsonObject::from(m_stats.pairs().transformed([](auto const& entry) {
-      return make_pair(entry.first, entry.second.toJson());
-    }));
+  JsonObject stats;
+  for (auto const& entry : m_stats.pairs()) {
+    stats[entry.first] = entry.second.toJson();
+  }
   JsonObject storage = {
       { "stats", stats },
       { "achievements", jsonFromStringSet(m_achievements) }
@@ -158,12 +159,11 @@ void Statistics::readStatistics() {
     String filename = File::relativeTo(m_storageDirectory, "statistics");
     if (File::exists(filename)) {
       Json storage = versioningDatabase->loadVersionedJson(VersionedJson::readFile(filename), "Statistics");
-
-      m_stats = StringMap<Stat>::from(storage.getObject("stats", {}).pairs().transformed([](auto const& entry) {
-          return make_pair(entry.first, Stat::fromJson(entry.second));
-        }));
+      m_stats.clear();
+      for (auto const& entry : storage.getObject("stats", {})) {
+        m_stats[entry.first] = Stat::fromJson(entry.second);
+      }
       m_achievements = jsonToStringSet(storage.get("achievements", JsonArray{}));
-
     }
   } catch (std::exception const& e) {
     Logger::warn("Error loading local player statistics file, resetting: {}", outputException(e, false));

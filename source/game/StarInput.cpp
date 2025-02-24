@@ -196,7 +196,7 @@ Json Input::bindToJson(Bind const& bind) {
       {"value", KeyNames.getRight(keyBind->key)}
     }; // don't want empty mods to exist as null entry
     if (auto mods = keyModsToJson(keyBind->mods))
-      obj.emplace("mods", std::move(mods));
+      obj["mods"] = std::move(mods);
     return obj;
   }
   else if (auto mouseBind = bind.ptr<MouseBind>()) {
@@ -205,7 +205,7 @@ Json Input::bindToJson(Bind const& bind) {
       {"value", MouseButtonNames.getRight(mouseBind->button)}
     };
     if (auto mods = keyModsToJson(mouseBind->mods))
-      obj.emplace("mods", std::move(mods));
+      obj["mods"] = std::move(mods);
     return obj;
   }
   else if (auto controllerBind = bind.ptr<ControllerBind>()) {
@@ -282,7 +282,7 @@ Input::BindCategory::BindCategory(String categoryId, Json const& categoryConfig)
   ConfigurationPtr userConfig = Root::singletonPtr()->configuration();
   auto userBindings = userConfig->get(InputBindingConfigRoot);
 
-  for (auto& pair : config.getObject("binds", {})) {
+  for (auto pair : config.getObject("binds", {})) {
     String const& bindId = pair.first;
     Json const& bindConfig = pair.second;
     if (!bindConfig.isType(Json::Type::Object))
@@ -552,7 +552,7 @@ void Input::reload() {;
   auto assets = Root::singleton().assets();
 
   for (auto& bindPath : assets->scanExtension("binds")) {
-    for (auto& pair : assets->json(bindPath).toObject()) {
+    for (auto pair : assets->json(bindPath).toObject()) {
       String const& categoryId = pair.first;
       Json const& categoryConfig = pair.second;
       if (!categoryConfig.isType(Json::Type::Object))

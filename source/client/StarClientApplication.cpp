@@ -452,7 +452,7 @@ void ClientApplication::renderReload() {
       StringMap<String> shaders;
       auto config = assets->json(path);
       auto shaderConfig = config.getObject("effectShaders");
-      for (auto& entry : shaderConfig) {
+      for (auto entry : shaderConfig) {
         if (entry.second.isType(Json::Type::String)) {
           String shader = entry.second.toString();
           if (!shader.hasChar('\n')) {
@@ -481,7 +481,7 @@ void ClientApplication::renderReload() {
   
   m_postProcessGroups.clear();
   auto postProcessGroups = assets->json("/client.config:postProcessGroups").toObject();
-  for (auto& pair : postProcessGroups) {
+  for (auto pair : postProcessGroups) {
     auto name = pair.first;
     auto groupConfig = groupsConfig.opt(name);
     auto def = pair.second.getBool("enabledDefault",true);

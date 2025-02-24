@@ -29,9 +29,9 @@ Json jsonFromNodeParameter(NodeParameter const& parameter) {
     {"type", NodeParameterTypeNames.getRight(parameter.first)}
   };
   if (auto key = parameter.second.maybe<String>())
-    json.set("key", *key);
+    json["key"] =  *key;
   else
-    json.set("value", parameter.second.get<Json>());
+    json["value"] = parameter.second.get<Json>();
   return json;
 }
 
@@ -119,7 +119,7 @@ Maybe<String> replaceOutputBehaviorTag(Maybe<String> const& output, StringMap<No
 
 // TODO: This is temporary until BehaviorState can handle valueType:value pairs
 void parseNodeParameters(JsonObject& parameters) {
-  for (auto& p : parameters)
+  for (auto p : parameters)
     p.second = p.second.opt("key").orMaybe(p.second.opt("value")).value(Json());
 }
 
@@ -156,7 +156,7 @@ BehaviorDatabase::BehaviorDatabase() {
   for (String const& file : nodeFiles) {
     try {
       Json nodes = assets->json(file);
-      for (auto& node : nodes.toObject()) {
+      for (auto node : nodes.toObject()) {
         StringMap<NodeParameter> parameters;
         for (auto p : node.second.getObject("properties", {}))
           parameters.set(p.first, jsonToNodeParameter(p.second));

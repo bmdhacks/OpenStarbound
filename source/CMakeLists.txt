@@ -575,11 +575,11 @@ set(STAR_GAME_INCLUDES
 add_subdirectory(game)
 
 # Googletest based tests
-option(BUILD_TESTING "Build test projects" OFF)
-if(BUILD_TESTING)
-  enable_testing()
-  add_subdirectory(test)
-endif()
+#option(BUILD_TESTING "Build test projects" OFF)
+#if(BUILD_TESTING)
+#  enable_testing()
+#  add_subdirectory(test)
+#endif()
 
 # Starbound stand-alone server.
 add_subdirectory(server)

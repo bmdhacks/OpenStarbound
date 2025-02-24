@@ -18,14 +18,14 @@ StatusController::StatusController(Json const& config) : m_statCollection(config
   m_parentEntity = nullptr;
   m_movementController = nullptr;
 
-  m_statusProperties.reset(config.getObject("statusProperties", {}));
+  m_statusProperties.reset(config.getObject("statusProperties", {}).toStringMap());
   m_statusProperties.setOverrides(
     [&](DataStream& ds, NetCompatibilityRules rules) {
       if (rules.version() <= 1) ds << m_statusProperties.baseMap();
       else m_statusProperties.NetElementHashMap<String, Json>::netStore(ds, rules);
     },
     [&](DataStream& ds, NetCompatibilityRules rules) {
-      if (rules.version() <= 1) m_statusProperties.reset(ds.read<JsonObject>());
+      if (rules.version() <= 1) m_statusProperties.reset(ds.read<JsonObject>().toStringMap());
       else m_statusProperties.NetElementHashMap<String, Json>::netLoad(ds, rules);
     },
     [&](DataStream& ds, uint64_t fromVersion, NetCompatibilityRules rules) {
@@ -39,7 +39,7 @@ StatusController::StatusController(Json const& config) : m_statCollection(config
       return m_statusProperties.NetElementHashMap<String, Json>::writeNetDelta(ds, fromVersion, rules);
     },
     [&](DataStream& ds, float interp, NetCompatibilityRules rules) {
-      if (rules.version() <= 1) m_statusProperties.reset(ds.read<JsonObject>());
+      if (rules.version() <= 1) m_statusProperties.reset(ds.read<JsonObject>().toStringMap());
       else m_statusProperties.NetElementHashMap<String, Json>::readNetDelta(ds, interp, rules);
     }
   );
@@ -109,7 +109,7 @@ void StatusController::diskLoad(Json const& store) {
   clearAllPersistentEffects();
   clearEphemeralEffects();
 
-  m_statusProperties.reset(store.getObject("statusProperties"));
+  m_statusProperties.reset(store.getObject("statusProperties").toStringMap());
 
   for (auto const& p : store.getObject("persistentEffectCategories", {}))
     addPersistentEffects(p.first, p.second.toArray().transformed(jsonToPersistentStatusEffect));

@@ -5,6 +5,7 @@
 #include "StarLexicalCast.hpp"
 #include "StarIterator.hpp"
 #include "StarFile.hpp"
+#include "StarLua.hpp"
 
 namespace Star {
 
@@ -118,6 +119,14 @@ Json Json::parseJson(String const& json) {
 
 Json::Json() {}
 
+Json::Json(float f) {
+  m_data = (double)f;
+}
+
+Json::Json(unsigned char c) {
+  m_data = (int64_t)c;
+}
+
 Json::Json(double d) {
   m_data = d;
 }
@@ -177,6 +186,10 @@ Json::Json(JsonArray l) {
 Json::Json(JsonObject m) {
   m_data = make_shared<JsonObject const>(std::move(m));
 }
+
+Json::Json(StringMap<Json> const& map) {
+  m_data = make_shared<JsonObject const>(std::move(map));
+}  
 
 double Json::toDouble() const {
   if (type() == Type::Float)
@@ -763,7 +776,7 @@ Json Json::erasePath(String path) const {
 
 Json Json::setAll(JsonObject values) const {
   auto map = toObject();
-  for (auto& p : values)
+  for (auto p : values)
     map[std::move(p.first)] = std::move(p.second);
   return map;
 }
@@ -1028,20 +1041,20 @@ Json const* Json::ptr(String const& key) const {
     throw JsonException::format("Cannot call get with key on Json type {}, must be Object type", typeName());
   auto const& map = m_data.get<JsonObjectConstPtr>();
 
-  auto i = map->find(key);
-  if (i == map->end())
-    return nullptr;
-
-  return &i->second;
+  return map->ptr(key);
 }
 
 Json jsonMerge(Json const& base, Json const& merger) {
   if (base.type() == Json::Type::Object && merger.type() == Json::Type::Object) {
     JsonObject merged = base.toObject();
     for (auto const& p : merger.toObject()) {
-      auto res = merged.insert(p);
-      if (!res.second)
-        res.first->second = jsonMerge(res.first->second, p.second);
+      if (merged.contains(p.first)) {
+        // Instead of modifying through iterator, use operator[] to set the value
+        Json mergedValue = jsonMerge(merged[p.first], p.second);
+        merged[p.first] = mergedValue;
+      } else {
+        merged[p.first] = p.second;
+      }
     }
     return merged;
   }
@@ -1054,10 +1067,12 @@ Json jsonMergeNulling(Json const& base, Json const& merger) {
     for (auto const& p : merger.toObject()) {
       if (p.second.isNull())
         merged.erase(p.first);
-      else {
-        auto res = merged.insert(p);
-        if (!res.second)
-          res.first->second = jsonMergeNulling(res.first->second, p.second);
+      else if (merged.contains(p.first)) {
+        // Same approach - don't modify through iterator
+        Json mergedValue = jsonMergeNulling(merged[p.first], p.second);
+        merged[p.first] = mergedValue;
+      } else {
+        merged[p.first] = p.second;
       }
     }
     return merged;

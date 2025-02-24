@@ -13,6 +13,22 @@ void JsonBuilderStream::objectKey(char32_t const* s, size_t len) {
 
 void JsonBuilderStream::endObject() {
   JsonObject object;
+  // Count how many key/value pairs until we hit the sentry
+  size_t count = 0;
+  // We know each pair is stored as a Key entry followed by a Value entry
+  // in LIFO order (the Value is on top, then the Key).
+  // So each pair = 2 consecutive entries in the stack.
+  for (ssize_t i = m_stack.size() - 1; i >= 0; i--) {
+    if (m_stack[i].isNothing()) // sentry
+      break; // found boundary
+    count++;
+  }
+  // 'count' is the number of entries after the sentry.
+  // The number of key/value pairs = count/2
+  // JsonObject is the primary user of FlatHashMap so reserving with a known
+  // size improves memory fragmentation
+  object.reserve(count/2);
+  
   while (true) {
     if (isSentry()) {
       set(Json(std::move(object)));
@@ -32,6 +48,15 @@ void JsonBuilderStream::beginArray() {
 
 void JsonBuilderStream::endArray() {
   JsonArray array;
+
+  // Count how many Value entries until we hit the sentry
+  size_t count = 0;
+  for (ssize_t i = m_stack.size() - 1; i >= 0; i--) {
+    if (m_stack[i].isNothing()) // sentry
+      break;
+    count++;
+  }
+  array.reserve(count); // pre-allocate the array
   while (true) {
     if (isSentry()) {
       array.reverse();

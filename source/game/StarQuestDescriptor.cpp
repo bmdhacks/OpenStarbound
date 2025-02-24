@@ -306,11 +306,11 @@ StringMap<String> questParamTags(StringMap<QuestParam> const& parameters) {
 }
 
 StringMap<QuestParam> questParamsFromJson(Json const& json) {
-  return transformedMapValues(json.toObject(), &QuestParam::fromJson);
+  return transformedMapValues(json.toObject().toStringMap(), &QuestParam::fromJson);
 }
 
 StringMap<QuestParam> questParamsDiskLoad(Json const& json) {
-  return transformedMapValues(json.toObject(), &QuestParam::diskLoad);
+  return transformedMapValues(json.toObject().toStringMap(), &QuestParam::diskLoad);
 }
 
 Json questParamsToJson(StringMap<QuestParam> const& parameters) {
