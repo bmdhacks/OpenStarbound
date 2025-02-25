@@ -10,7 +10,7 @@ PlayerTech::PlayerTech(Json const& json) {
   m_availableTechs = jsonToStringSet(json.get("availableTechs"));
   m_enabledTechs = jsonToStringSet(json.get("enabledTechs"));
   auto techDatabase = Root::singleton().techDatabase();
-  for (auto& p : json.getObject("equippedTechs")) {
+  for (auto p : json.getObject("equippedTechs")) {
     String techName = p.second.toString();
     if (techDatabase->contains(techName))
       m_equippedTechs.set(TechTypeNames.getLeft(p.first), techName);

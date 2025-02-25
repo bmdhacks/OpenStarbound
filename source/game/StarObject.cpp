@@ -1,5 +1,6 @@
 #include "StarObject.hpp"
 #include "StarDataStreamExtra.hpp"
+#include "StarJson.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarWorld.hpp"
 #include "StarLexicalCast.hpp"
@@ -27,7 +28,7 @@ namespace Star {
 Object::Object(ObjectConfigConstPtr config, Json const& parameters) {
   m_config = config;
   if (!parameters.isNull())
-    m_parameters.reset(parameters.toObject());
+    m_parameters.reset(parameters.toObject().toStringMap());
 
   m_animationTimer = 0.0f;
   m_currentFrame = 0;

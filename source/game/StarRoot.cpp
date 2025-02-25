@@ -410,7 +410,7 @@ ConfigurationPtr Root::configuration() {
               throw ConfigurationException("User config version does not match default config version");
 
             auto config = jConfig.toObject();
-            for (auto& entry : *m_settings.defaultConfiguration.objectPtr()) {
+            for (auto entry : *m_settings.defaultConfiguration.objectPtr()) {
               if (!config.contains(entry.first))
                 config.insert(entry.first, entry.second);
             }

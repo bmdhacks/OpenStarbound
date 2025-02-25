@@ -236,7 +236,7 @@ DataStream& operator>>(DataStream& ds, WarpToWorld& warpToWorld) {
 
 DataStream& operator<<(DataStream& ds, WarpToWorld const& warpToWorld) {
   ds << warpToWorld.world;
-  ds << warpToWorld.target;
+  ds << printSpawnTarget(warpToWorld.target);
   return ds;
 }
 

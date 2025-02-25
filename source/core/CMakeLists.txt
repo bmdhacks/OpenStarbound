@@ -48,6 +48,7 @@ SET (star_core_HEADERS
     StarRefPtr.hpp
     StarIterator.hpp
     StarJson.hpp
+    StarJsonObject.hpp
     StarJsonBuilder.hpp
     StarJsonExtra.hpp
     StarJsonParser.hpp
@@ -158,6 +159,7 @@ SET (star_core_SOURCES
     StarImageScaling.cpp
     StarInputEvent.cpp
     StarJson.cpp
+    StarJsonObject.cpp
     StarJsonBuilder.cpp
     StarJsonExtra.cpp
     StarJsonPath.cpp

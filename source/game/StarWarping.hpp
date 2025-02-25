@@ -62,7 +62,10 @@ struct WarpToWorld {
   WarpToWorld();
   explicit WarpToWorld(WorldId world, SpawnTarget spawn = {});
   explicit WarpToWorld(Json v);
-
+  explicit WarpToWorld(CelestialWorldId celestialId) : WarpToWorld(WorldId(celestialId)) {}
+  explicit WarpToWorld(ClientShipWorldId worldId) : WarpToWorld(WorldId(worldId)) {}
+  explicit WarpToWorld(InstanceWorldId worldId) : WarpToWorld(WorldId(worldId)) {}
+  
   WorldId world;
   SpawnTarget target;
 

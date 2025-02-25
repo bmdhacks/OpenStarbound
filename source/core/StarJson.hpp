@@ -1,9 +1,14 @@
 #pragma once
 
+#include "StarFlatHashTable.hpp"
+#include "StarIntern.hpp"
+#include "StarString.hpp"
 #include "StarDataStream.hpp"
 #include "StarVariant.hpp"
 #include "StarString.hpp"
 #include "StarXXHash.hpp"
+#include "StarLogging.hpp"
+#include "StarJsonObject.hpp"
 
 namespace Star {
 
@@ -14,9 +19,6 @@ STAR_CLASS(Json);
 
 typedef List<Json> JsonArray;
 typedef shared_ptr<JsonArray const> JsonArrayConstPtr;
-
-typedef StringMap<Json> JsonObject;
-typedef shared_ptr<JsonObject const> JsonObjectConstPtr;
 
 // Class for holding representation of JSON data.  Immutable and implicitly
 // shared.
@@ -61,6 +63,8 @@ public:
   // Constructs type Null
   Json();
 
+  Json(unsigned char);
+  Json(float);
   Json(double);
   Json(bool);
   Json(int);
@@ -76,6 +80,7 @@ public:
   Json(std::string);
   Json(JsonArray);
   Json(JsonObject);
+  Json(StringMap<Json> const& map);
 
   // Float and Int types are convertible between each other.  toDouble,
   // toFloat, toInt, toUInt may be called on either an Int or a Float.  For a
@@ -267,6 +272,7 @@ public:
   void getHash(XXHash3& hasher) const;
 
 private:
+
   Json const* ptr(size_t index) const;
   Json const* ptr(String const& key) const;
 
@@ -274,9 +280,6 @@ private:
 };
 
 std::ostream& operator<<(std::ostream& os, Json const& v);
-
-// Fixes ambiguity with OrderedHashMap operator<<
-std::ostream& operator<<(std::ostream& os, JsonObject const& v);
 
 // Serialize json to DataStream.  Strings are stored as UTF-8, ints are stored
 // as VLQ, doubles as 64 bit.
@@ -286,8 +289,9 @@ DataStream& operator>>(DataStream& ds, Json& v);
 // Convenience methods for Json containers
 DataStream& operator<<(DataStream& ds, JsonArray const& l);
 DataStream& operator>>(DataStream& ds, JsonArray& l);
-DataStream& operator<<(DataStream& ds, JsonObject const& m);
-DataStream& operator>>(DataStream& ds, JsonObject& m);
+
+DataStream& operator<<(DataStream& ds, JsonObject const& v);
+DataStream& operator>>(DataStream& ds, JsonObject& v);
 
 // Merges the two given json values and returns the result, by the following
 // rules (applied in order):  If the base value is null, returns the merger.
@@ -373,4 +377,3 @@ bool jsonPartialMatch(Json const& base, Json const& compare);
 }
 
 template <> struct fmt::formatter<Star::Json> : ostream_formatter {};
-template <> struct fmt::formatter<Star::JsonObject> : ostream_formatter {};

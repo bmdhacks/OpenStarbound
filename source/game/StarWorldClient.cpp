@@ -1010,7 +1010,7 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
       }
     } else if (auto updateWorldProperties = as<UpdateWorldPropertiesPacket>(packet)) {
       // Kae: Properties set to null (nil from Lua) should be erased instead of lingering around
-      for (auto& pair : updateWorldProperties->updatedProperties) {
+      for (auto pair : updateWorldProperties->updatedProperties) {
         if (pair.second.isNull())
           m_worldProperties.erase(pair.first);
         else
