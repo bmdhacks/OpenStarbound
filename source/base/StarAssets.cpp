@@ -563,8 +563,10 @@ IODevicePtr Assets::openFile(String const& path) const {
   return open(path);
 }
 
-void Assets::setCaching(bool onoff) const {
-  m_doCaching = onoff;
+Assets::CacheStragegy Assets::setCaching(Assets::CacheStragegy stragegy) const {
+  CacheStragegy old=m_cacheStragegy;
+  m_cacheStragegy=stragegy;
+  return old;
 }
 
 void Assets::clearCache() {
@@ -1159,7 +1161,7 @@ shared_ptr<Assets::AssetData> Assets::loadAsset(AssetId const& id, bool doCache)
       m_queue.toBack(id);
     }
 
-    if (doCache && m_doCaching) {
+    if (m_cacheStragegy!=CacheStragegy::Everything || (doCache && m_cacheStragegy == CacheStragegy::Heuristic)) {
       m_assetsCache[id] = assetData;
       freshen(assetData);
     }
@@ -1253,7 +1255,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
       return {};
 
     // cache the master sheet
-    if (m_doCaching) {
+    if (m_cacheStragegy!=CacheStragegy::OFF) {
       m_assetsCache[parentId]=imageData;
       freshen(imageData);
     }
@@ -1269,7 +1271,7 @@ shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
         return {};
 
       // cache the alias
-      if (m_doCaching) {
+      if (m_cacheStragegy!=CacheStragegy::OFF) {
         m_assetsCache[aliasId]=imageData;
         freshen(imageData);
       }

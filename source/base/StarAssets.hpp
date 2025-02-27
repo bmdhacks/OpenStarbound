@@ -86,6 +86,12 @@ public:
     Handoff
   };
 
+  enum class CacheStragegy {
+    OFF,  // cache nothing
+    Heuristic, // cache based on a heuristic in shouldCache (currently no subpath assets)
+    Everything // cache everything
+  };
+
   struct AssetId {
     AssetType type;
     AssetPath path;
@@ -255,7 +261,7 @@ public:
   IODevicePtr openFile(String const& basePath) const;
 
   // Turn caching on or off
-  void setCaching(bool onoff) const;
+  CacheStragegy setCaching(CacheStragegy strategy) const;
 
   // Clear all cached assets that are not queued, persistent, or broken.
   void clearCache();
@@ -325,7 +331,7 @@ private:
   mutable ConditionVariable m_assetsQueued;
   mutable OrderedHashMap<AssetId, QueueEntry, AssetIdHash> m_queue;
 
-  mutable bool m_doCaching=true;
+  mutable CacheStragegy m_cacheStragegy=CacheStragegy::Heuristic;
   mutable ConditionVariable m_assetsDone;
   mutable HashMap<AssetId, shared_ptr<AssetData>, AssetIdHash> m_assetsCache;
 
