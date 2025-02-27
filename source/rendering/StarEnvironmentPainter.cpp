@@ -1,5 +1,6 @@
 #include "StarEnvironmentPainter.hpp"
 #include "StarLexicalCast.hpp"
+#include "StarPerlin.hpp"
 #include "StarTime.hpp"
 #include "StarXXHash.hpp"
 #include "StarJsonExtra.hpp"
@@ -29,7 +30,7 @@ EnvironmentPainter::EnvironmentPainter(RendererPtr renderer) {
   m_renderer = std::move(renderer);
   m_textureGroup = make_shared<AssetTextureGroup>(m_renderer->createTextureGroup(TextureGroupSize::Large));
   m_timer = 0;
-  m_rayPerlin = PerlinF(1, RayPerlinFrequency, RayPerlinAmplitude, 0, 2.0f, 2.0f, Random::randu64());
+  m_rayPerlin = DeterministicFloatF(1, RayPerlinFrequency, RayPerlinAmplitude, 0, 2.0f, 2.0f, Random::randu64());
 }
 
 void EnvironmentPainter::update(float dt) {

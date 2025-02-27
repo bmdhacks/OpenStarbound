@@ -1,6 +1,7 @@
 #include "StarCelestialDatabase.hpp"
 #include "StarLexicalCast.hpp"
 #include "StarCasting.hpp"
+#include "StarPerlin.hpp"
 #include "StarRandom.hpp"
 #include "StarCompression.hpp"
 #include "StarFile.hpp"
@@ -94,7 +95,7 @@ CelestialMasterDatabase::CelestialMasterDatabase(Maybe<String> databaseFile) {
     m_generationInformation.systemTypes.add(systemPair.first, systemType);
   }
 
-  m_generationInformation.systemTypePerlin = PerlinD(config.getObject("systemTypePerlin"), staticRandomU64("SystemTypePerlin"));
+  m_generationInformation.systemTypePerlin = DeterministicFloatD(config.getObject("systemTypePerlin"), staticRandomU64("SystemTypePerlin"));
   m_generationInformation.systemTypeBins = config.get("systemTypeBins");
 
   for (auto const& planetaryPair : Map<String, Json>::from(config.getObject("planetaryTypes"))) {

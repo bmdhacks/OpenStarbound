@@ -23,7 +23,7 @@ struct RidgeBlocksSelector : TerrainSelector {
 
   PerlinF ridgePerlin1;
   PerlinF ridgePerlin2;
-  PerlinF noisePerlin;
+  VisualPerlinF noisePerlin;
 };
 
 }

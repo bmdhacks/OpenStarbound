@@ -4,6 +4,8 @@
 #include "StarBiMap.hpp"
 #include "StarInterpolation.hpp"
 #include "StarRandom.hpp"
+#include "StarMap.hpp"
+#include "StarThread.hpp"
 
 namespace Star {
 
@@ -17,9 +19,54 @@ enum class PerlinType {
 };
 extern EnumMap<PerlinType> const PerlinTypeNames;
 
-int const PerlinSampleSize = 512;
-
+// Default sample size for full-quality noise
+// For visual effects, a smaller size can be used (e.g. 128 or 256)
 template <typename Float>
+struct PerlinTables {
+  std::shared_ptr<int[]> p;
+  std::shared_ptr<Float[]> g1;
+  std::shared_ptr<Float[][2]> g2;
+  std::shared_ptr<Float[][3]> g3;
+  
+  static void initialize(uint64_t seed, int sampleSize,
+      std::shared_ptr<int[]>& p, 
+      std::shared_ptr<Float[]>& g1,
+      std::shared_ptr<Float[][2]>& g2,
+      std::shared_ptr<Float[][3]>& g3);
+};
+
+// Static cache of tables by seed - protected by mutex to ensure thread safety
+template <typename Float>
+class PerlinTableCache {
+public:
+  static std::shared_ptr<PerlinTables<Float>> getOrCreate(uint64_t seed, int sampleSize) {
+    MutexLocker locker(mutex());
+    
+    auto key = std::make_pair(seed, sampleSize);
+    auto& tablePtr = cache()[key];
+    
+    if (!tablePtr) {
+      tablePtr = std::make_shared<PerlinTables<Float>>();
+      PerlinTables<Float>::initialize(seed, sampleSize, 
+          tablePtr->p, tablePtr->g1, tablePtr->g2, tablePtr->g3);
+    }
+    
+    return tablePtr;
+  }
+  
+private:
+  static Mutex& mutex() {
+    static Mutex m;
+    return m;
+  }
+  
+  static Map<std::pair<uint64_t, int>, std::shared_ptr<PerlinTables<Float>>>& cache() {
+    static Map<std::pair<uint64_t, int>, std::shared_ptr<PerlinTables<Float>>> c;
+    return c;
+  }
+};
+
+template <typename Float, int SampleSize = 512>
 class Perlin {
 public:
   // Default constructed perlin noise is uninitialized and cannot be queried.
@@ -53,7 +100,7 @@ public:
 
 private:
   static Float s_curve(Float t);
-  static void setup(Float v, int& b0, int& b1, Float& r0, Float& r1);
+  static void setup(Float v, int& b0, int& b1, Float& r0, Float& r1, int sampleSize);
 
   static Float at2(Float* q, Float rx, Float ry);
   static Float at3(Float* q, Float rx, Float ry, Float rz);
@@ -93,43 +140,317 @@ private:
   Float m_offset;
   Float m_gain;
 
-  unique_ptr<int[]> p;
-  unique_ptr<Float[][3]> g3;
-  unique_ptr<Float[][2]> g2;
-  unique_ptr<Float[]> g1;
+  // Shared tables for improved memory efficiency
+  std::shared_ptr<PerlinTables<Float>> m_tables;
+  
+  // References to the tables (for convenience/performance)
+  std::shared_ptr<int[]> p;
+  std::shared_ptr<Float[]> g1;
+  std::shared_ptr<Float[][2]> g2;
+  std::shared_ptr<Float[][3]> g3;
+  
+  // Sample size - fixed at compile time for each instantiation
+  const int m_sampleSize = SampleSize;
 };
+
+
+// Simple deterministic float generator that functions as a drop-in replacement for Perlin
+template <typename Float>
+class DeterministicFloatGenerator {
+public:
+  DeterministicFloatGenerator() {
+    m_type = PerlinType::Perlin;
+    m_seed = 0;
+    m_octaves = 0;
+    m_frequency = 0;
+    m_amplitude = 0;
+    m_bias = 0;
+    m_alpha = 0;
+    m_beta = 0;
+  }
+
+  DeterministicFloatGenerator(unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
+    m_type = PerlinType::Perlin;
+    m_seed = seed;
+    m_octaves = octaves;
+    m_frequency = freq;
+    m_amplitude = amp;
+    m_bias = bias;
+    m_alpha = alpha;
+    m_beta = beta;
+  }
+
+  DeterministicFloatGenerator(PerlinType type, unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
+    m_type = type;
+    m_seed = seed;
+    m_octaves = octaves;
+    m_frequency = freq;
+    m_amplitude = amp;
+    m_bias = bias;
+    m_alpha = alpha;
+    m_beta = beta;
+  }
+
+  DeterministicFloatGenerator(Json const& config, uint64_t seed) 
+    : DeterministicFloatGenerator(config.set("seed", seed)) {}
+
+  explicit DeterministicFloatGenerator(Json const& json) {
+    m_seed = json.getUInt("seed");
+    m_octaves = json.getInt("octaves", 1);
+    m_frequency = json.getDouble("frequency", 1.0);
+    m_amplitude = json.getDouble("amplitude", 1.0);
+    m_bias = json.getDouble("bias", 0.0);
+    m_alpha = json.getDouble("alpha", 2.0);
+    m_beta = json.getDouble("beta", 2.0);
+    m_type = PerlinTypeNames.getLeft(json.getString("type", "perlin"));
+  }
+
+  DeterministicFloatGenerator(DeterministicFloatGenerator const& other) {
+    *this = other;
+  }
+
+  DeterministicFloatGenerator(DeterministicFloatGenerator&& other) {
+    *this = std::move(other);
+  }
+
+  DeterministicFloatGenerator& operator=(DeterministicFloatGenerator const& other) {
+    if (this != &other) {
+      m_type = other.m_type;
+      m_seed = other.m_seed;
+      m_octaves = other.m_octaves;
+      m_frequency = other.m_frequency;
+      m_amplitude = other.m_amplitude;
+      m_bias = other.m_bias;
+      m_alpha = other.m_alpha;
+      m_beta = other.m_beta;
+    }
+    return *this;
+  }
+
+  DeterministicFloatGenerator& operator=(DeterministicFloatGenerator&& other) {
+    m_type = other.m_type;
+    m_seed = other.m_seed;
+    m_octaves = other.m_octaves;
+    m_frequency = other.m_frequency;
+    m_amplitude = other.m_amplitude;
+    m_bias = other.m_bias;
+    m_alpha = other.m_alpha;
+    m_beta = other.m_beta;
+    return *this;
+  }
+
+  // Core functionality: hash-based deterministic value generation
+  Float get(Float x) const {
+    Float value = 0;
+    Float scale = 1.0;
+    
+    x *= m_frequency;
+    
+    for (unsigned i = 0; i < m_octaves; ++i) {
+      value += hashFloat(computeHash(x)) / scale;
+      scale *= m_alpha;
+      x *= m_beta;
+    }
+    
+    return value * m_amplitude + m_bias;
+  }
+
+  Float get(Float x, Float y) const {
+    Float value = 0;
+    Float scale = 1.0;
+    
+    x *= m_frequency;
+    y *= m_frequency;
+    
+    for (unsigned i = 0; i < m_octaves; ++i) {
+      value += hashFloat(computeHash(x, y)) / scale;
+      scale *= m_alpha;
+      x *= m_beta;
+      y *= m_beta;
+    }
+    
+    return value * m_amplitude + m_bias;
+  }
+
+  Float get(Float x, Float y, Float z) const {
+    Float value = 0;
+    Float scale = 1.0;
+    
+    x *= m_frequency;
+    y *= m_frequency;
+    z *= m_frequency;
+    
+    for (unsigned i = 0; i < m_octaves; ++i) {
+      value += hashFloat(computeHash(x, y, z)) / scale;
+      scale *= m_alpha;
+      x *= m_beta;
+      y *= m_beta;
+      z *= m_beta;
+    }
+    
+    return value * m_amplitude + m_bias;
+  }
+
+  // Accessor methods to match Perlin API
+  PerlinType type() const { return m_type; }
+  unsigned octaves() const { return m_octaves; }
+  Float frequency() const { return m_frequency; }
+  Float amplitude() const { return m_amplitude; }
+  Float bias() const { return m_bias; }
+  Float alpha() const { return m_alpha; }
+  Float beta() const { return m_beta; }
+
+  // Serialization to match Perlin
+  Json toJson() const {
+    return JsonObject{
+      {"seed", m_seed},
+      {"octaves", m_octaves},
+      {"frequency", m_frequency},
+      {"amplitude", m_amplitude},
+      {"bias", m_bias},
+      {"alpha", m_alpha},
+      {"beta", m_beta},
+      {"type", PerlinTypeNames.getRight(m_type)}
+    };
+  }
+
+private:
+  PerlinType m_type;
+  uint64_t m_seed;
+  unsigned m_octaves;
+  Float m_frequency;
+  Float m_amplitude;
+  Float m_bias;
+  Float m_alpha;
+  Float m_beta;
+
+  // Convert a hash to a Float value in range [-1, 1]
+  Float hashFloat(uint64_t hash) const {
+    // Use the lower 32 bits for better distribution
+    uint32_t value = hash & 0xFFFFFFFF;
+    return (Float(value) / Float(0xFFFFFFFF)) * 2.0 - 1.0;
+  }
+
+  // Compute hash for a specific coordinate set
+  uint64_t computeHash(Float x, Float y = 0, Float z = 0) const {
+    XXHash64 hasher(m_seed);
+    
+    // Convert floats to integers to avoid precision issues
+    int32_t ix = int32_t(x * 1000);
+    int32_t iy = int32_t(y * 1000);
+    int32_t iz = int32_t(z * 1000);
+    
+    hasher.push(reinterpret_cast<char const*>(&ix), sizeof(ix));
+    hasher.push(reinterpret_cast<char const*>(&iy), sizeof(iy));
+    hasher.push(reinterpret_cast<char const*>(&iz), sizeof(iz));
+    
+    return hasher.digest();
+  }
+};
+
+// Type aliases to match Perlin
+typedef DeterministicFloatGenerator<float> DeterministicFloatF;
+typedef DeterministicFloatGenerator<double> DeterministicFloatD;
+
+// Specialized versions with smaller sample sizes for visual effects
+template <typename Float>
+using VisualPerlin = Perlin<Float, 128>;
 
 typedef Perlin<float> PerlinF;
 typedef Perlin<double> PerlinD;
+typedef VisualPerlin<float> VisualPerlinF;
 
 template <typename Float>
-Float Perlin<Float>::s_curve(Float t) {
+void PerlinTables<Float>::initialize(uint64_t seed, int sampleSize,
+    std::shared_ptr<int[]>& p, 
+    std::shared_ptr<Float[]>& g1,
+    std::shared_ptr<Float[][2]>& g2,
+    std::shared_ptr<Float[][3]>& g3) {
+  
+  RandomSource randomSource(seed);
+  
+  p.reset(new int[sampleSize + sampleSize + 2]);
+  g1.reset(new Float[sampleSize + sampleSize + 2]);
+  g2.reset(new Float[sampleSize + sampleSize + 2][2]);
+  g3.reset(new Float[sampleSize + sampleSize + 2][3]);
+
+  int i, j, k;
+
+  for (i = 0; i < sampleSize; i++) {
+    p[i] = i;
+    g1[i] = (Float)(randomSource.randInt(-sampleSize, sampleSize)) / sampleSize;
+
+    for (j = 0; j < 2; j++)
+      g2[i][j] = (Float)(randomSource.randInt(-sampleSize, sampleSize)) / sampleSize;
+    // Normalize the vector
+    Float s = sqrt(g2[i][0] * g2[i][0] + g2[i][1] * g2[i][1]);
+    if (s == 0.0f) {
+      g2[i][0] = 1.0f;
+      g2[i][1] = 0.0f;
+    } else {
+      g2[i][0] = g2[i][0] / s;
+      g2[i][1] = g2[i][1] / s;
+    }
+
+    for (j = 0; j < 3; j++)
+      g3[i][j] = (Float)(randomSource.randInt(-sampleSize, sampleSize)) / sampleSize;
+    // Normalize the vector
+    s = sqrt(g3[i][0] * g3[i][0] + g3[i][1] * g3[i][1] + g3[i][2] * g3[i][2]);
+    if (s == 0.0f) {
+      g3[i][0] = 1.0f;
+      g3[i][1] = 0.0f;
+      g3[i][2] = 0.0f;
+    } else {
+      g3[i][0] = g3[i][0] / s;
+      g3[i][1] = g3[i][1] / s;
+      g3[i][2] = g3[i][2] / s;
+    }
+  }
+
+  while (--i) {
+    k = p[i];
+    p[i] = p[j = randomSource.randUInt(sampleSize - 1)];
+    p[j] = k;
+  }
+
+  for (i = 0; i < sampleSize + 2; i++) {
+    p[sampleSize + i] = p[i];
+    g1[sampleSize + i] = g1[i];
+    for (j = 0; j < 2; j++)
+      g2[sampleSize + i][j] = g2[i][j];
+    for (j = 0; j < 3; j++)
+      g3[sampleSize + i][j] = g3[i][j];
+  }
+}
+
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::s_curve(Float t) {
   return t * t * (3.0 - 2.0 * t);
 }
 
-template <typename Float>
-void Perlin<Float>::setup(Float v, int& b0, int& b1, Float& r0, Float& r1) {
+template <typename Float, int SampleSize>
+void Perlin<Float, SampleSize>::setup(Float v, int& b0, int& b1, Float& r0, Float& r1, int sampleSize) {
   int iv = floor(v);
   Float fv = v - iv;
 
-  b0 = iv & (PerlinSampleSize - 1);
-  b1 = (iv + 1) & (PerlinSampleSize - 1);
+  b0 = iv & (sampleSize - 1);
+  b1 = (iv + 1) & (sampleSize - 1);
   r0 = fv;
   r1 = fv - 1.0;
 }
 
-template <typename Float>
-Float Perlin<Float>::at2(Float* q, Float rx, Float ry) {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::at2(Float* q, Float rx, Float ry) {
   return rx * q[0] + ry * q[1];
 }
 
-template <typename Float>
-Float Perlin<Float>::at3(Float* q, Float rx, Float ry, Float rz) {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::at3(Float* q, Float rx, Float ry, Float rz) {
   return rx * q[0] + ry * q[1] + rz * q[2];
 }
 
-template <typename Float>
-Perlin<Float>::Perlin() {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin() {
   m_type = PerlinType::Uninitialized;
   m_alpha = 0;
   m_amplitude = 0;
@@ -142,8 +463,8 @@ Perlin<Float>::Perlin() {
   m_octaves = 0;
 }
 
-template <typename Float>
-Perlin<Float>::Perlin(unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
   m_type = PerlinType::Perlin;
   m_seed = seed;
 
@@ -161,8 +482,8 @@ Perlin<Float>::Perlin(unsigned octaves, Float freq, Float amp, Float bias, Float
   init(m_seed);
 }
 
-template <typename Float>
-Perlin<Float>::Perlin(PerlinType type, unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(PerlinType type, unsigned octaves, Float freq, Float amp, Float bias, Float alpha, Float beta, uint64_t seed) {
   m_type = type;
   m_seed = seed;
 
@@ -180,12 +501,12 @@ Perlin<Float>::Perlin(PerlinType type, unsigned octaves, Float freq, Float amp, 
   init(m_seed);
 }
 
-template <typename Float>
-Perlin<Float>::Perlin(Json const& config, uint64_t seed)
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(Json const& config, uint64_t seed)
   : Perlin(config.set("seed", seed)) {}
 
-template <typename Float>
-Perlin<Float>::Perlin(Json const& json) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(Json const& json) {
   m_seed = json.getUInt("seed");
   m_octaves = json.getInt("octaves", 1);
   m_frequency = json.getDouble("frequency", 1.0);
@@ -202,25 +523,25 @@ Perlin<Float>::Perlin(Json const& json) {
   init(m_seed);
 }
 
-template <typename Float>
-Perlin<Float>::Perlin(Perlin const& perlin) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(Perlin const& perlin) {
   *this = perlin;
 }
 
-template <typename Float>
-Perlin<Float>::Perlin(Perlin&& perlin) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>::Perlin(Perlin&& perlin) {
   *this = std::move(perlin);
 }
 
-template <typename Float>
-Perlin<Float>& Perlin<Float>::operator=(Perlin const& perlin) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>& Perlin<Float, SampleSize>::operator=(Perlin const& perlin) {
   if (perlin.m_type == PerlinType::Uninitialized) {
     m_type = PerlinType::Uninitialized;
-    p.reset();
-    g3.reset();
-    g2.reset();
-    g1.reset();
-
+    m_tables = nullptr;
+    p = nullptr;
+    g3 = nullptr;
+    g2 = nullptr;
+    g1 = nullptr;
   } else if (this != &perlin) {
     m_type = perlin.m_type;
     m_seed = perlin.m_seed;
@@ -232,23 +553,20 @@ Perlin<Float>& Perlin<Float>::operator=(Perlin const& perlin) {
     m_beta = perlin.m_beta;
     m_offset = perlin.m_offset;
     m_gain = perlin.m_gain;
-
-    p.reset(new int[PerlinSampleSize + PerlinSampleSize + 2]);
-    g3.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2][3]);
-    g2.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2][2]);
-    g1.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2]);
-
-    std::memcpy(p.get(), perlin.p.get(), (PerlinSampleSize + PerlinSampleSize + 2) * sizeof(int));
-    std::memcpy(g3.get(), perlin.g3.get(), (PerlinSampleSize + PerlinSampleSize + 2) * sizeof(Float) * 3);
-    std::memcpy(g2.get(), perlin.g2.get(), (PerlinSampleSize + PerlinSampleSize + 2) * sizeof(Float) * 2);
-    std::memcpy(g1.get(), perlin.g1.get(), (PerlinSampleSize + PerlinSampleSize + 2) * sizeof(Float));
+    
+    // Share the table references
+    m_tables = perlin.m_tables;
+    p = perlin.p;
+    g1 = perlin.g1;
+    g2 = perlin.g2;
+    g3 = perlin.g3;
   }
 
   return *this;
 }
 
-template <typename Float>
-Perlin<Float>& Perlin<Float>::operator=(Perlin&& perlin) {
+template <typename Float, int SampleSize>
+Perlin<Float, SampleSize>& Perlin<Float, SampleSize>::operator=(Perlin&& perlin) {
   m_type = perlin.m_type;
   m_seed = perlin.m_seed;
   m_octaves = perlin.m_octaves;
@@ -260,6 +578,7 @@ Perlin<Float>& Perlin<Float>::operator=(Perlin&& perlin) {
   m_offset = perlin.m_offset;
   m_gain = perlin.m_gain;
 
+  m_tables = std::move(perlin.m_tables);
   p = std::move(perlin.p);
   g3 = std::move(perlin.g3);
   g2 = std::move(perlin.g2);
@@ -268,8 +587,20 @@ Perlin<Float>& Perlin<Float>::operator=(Perlin&& perlin) {
   return *this;
 }
 
-template <typename Float>
-Float Perlin<Float>::get(Float x) const {
+template <typename Float, int SampleSize>
+void Perlin<Float, SampleSize>::init(uint64_t seed) {
+  // Get or create the shared tables for this seed and sample size
+  m_tables = PerlinTableCache<Float>::getOrCreate(seed, m_sampleSize);
+  
+  // Set references to the shared tables
+  p = m_tables->p;
+  g1 = m_tables->g1;
+  g2 = m_tables->g2;
+  g3 = m_tables->g3;
+}
+
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::get(Float x) const {
   switch (m_type) {
     case PerlinType::Perlin:
       return perlin(x);
@@ -282,8 +613,8 @@ Float Perlin<Float>::get(Float x) const {
   }
 }
 
-template <typename Float>
-Float Perlin<Float>::get(Float x, Float y) const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::get(Float x, Float y) const {
   switch (m_type) {
     case PerlinType::Perlin:
       return perlin(x, y);
@@ -296,8 +627,8 @@ Float Perlin<Float>::get(Float x, Float y) const {
   }
 }
 
-template <typename Float>
-Float Perlin<Float>::get(Float x, Float y, Float z) const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::get(Float x, Float y, Float z) const {
   switch (m_type) {
     case PerlinType::Perlin:
       return perlin(x, y, z);
@@ -310,43 +641,43 @@ Float Perlin<Float>::get(Float x, Float y, Float z) const {
   }
 }
 
-template <typename Float>
-PerlinType Perlin<Float>::type() const {
+template <typename Float, int SampleSize>
+PerlinType Perlin<Float, SampleSize>::type() const {
   return m_type;
 }
 
-template <typename Float>
-unsigned Perlin<Float>::octaves() const {
+template <typename Float, int SampleSize>
+unsigned Perlin<Float, SampleSize>::octaves() const {
   return m_octaves;
 }
 
-template <typename Float>
-Float Perlin<Float>::frequency() const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::frequency() const {
   return m_frequency;
 }
 
-template <typename Float>
-Float Perlin<Float>::amplitude() const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::amplitude() const {
   return m_amplitude;
 }
 
-template <typename Float>
-Float Perlin<Float>::bias() const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::bias() const {
   return m_bias;
 }
 
-template <typename Float>
-Float Perlin<Float>::alpha() const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::alpha() const {
   return m_alpha;
 }
 
-template <typename Float>
-Float Perlin<Float>::beta() const {
+template <typename Float, int SampleSize>
+Float Perlin<Float, SampleSize>::beta() const {
   return m_beta;
 }
 
-template <typename Float>
-Json Perlin<Float>::toJson() const {
+template <typename Float, int SampleSize>
+Json Perlin<Float, SampleSize>::toJson() const {
   return JsonObject{
     {"seed", m_seed},
     {"octaves", m_octaves},
@@ -361,12 +692,12 @@ Json Perlin<Float>::toJson() const {
   };
 }
 
-template <typename Float>
-inline Float Perlin<Float>::noise1(Float arg) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::noise1(Float arg) const {
   int bx0, bx1;
   Float rx0, rx1, sx, u, v;
 
-  setup(arg, bx0, bx1, rx0, rx1);
+  setup(arg, bx0, bx1, rx0, rx1, m_sampleSize);
 
   sx = s_curve(rx0);
   u = rx0 * g1[p[bx0]];
@@ -375,14 +706,14 @@ inline Float Perlin<Float>::noise1(Float arg) const {
   return (lerp(sx, u, v));
 }
 
-template <typename Float>
-inline Float Perlin<Float>::noise2(Float vec[2]) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::noise2(Float vec[2]) const {
   int bx0, bx1, by0, by1, b00, b10, b01, b11;
   Float rx0, rx1, ry0, ry1, sx, sy, a, b, u, v;
   int i, j;
 
-  setup(vec[0], bx0, bx1, rx0, rx1);
-  setup(vec[1], by0, by1, ry0, ry1);
+  setup(vec[0], bx0, bx1, rx0, rx1, m_sampleSize);
+  setup(vec[1], by0, by1, ry0, ry1, m_sampleSize);
 
   i = p[bx0];
   j = p[bx1];
@@ -406,15 +737,15 @@ inline Float Perlin<Float>::noise2(Float vec[2]) const {
   return lerp(sy, a, b);
 }
 
-template <typename Float>
-inline Float Perlin<Float>::noise3(Float vec[3]) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::noise3(Float vec[3]) const {
   int bx0, bx1, by0, by1, bz0, bz1, b00, b10, b01, b11;
   Float rx0, rx1, ry0, ry1, rz0, rz1, sx, sy, sz, a, b, c, d, u, v;
   int i, j;
 
-  setup(vec[0], bx0, bx1, rx0, rx1);
-  setup(vec[1], by0, by1, ry0, ry1);
-  setup(vec[2], bz0, bz1, rz0, rz1);
+  setup(vec[0], bx0, bx1, rx0, rx1, m_sampleSize);
+  setup(vec[1], by0, by1, ry0, ry1, m_sampleSize);
+  setup(vec[2], bz0, bz1, rz0, rz1, m_sampleSize);
 
   i = p[bx0];
   j = p[bx1];
@@ -451,8 +782,8 @@ inline Float Perlin<Float>::noise3(Float vec[3]) const {
   return lerp(sz, c, d);
 }
 
-template <typename Float>
-void Perlin<Float>::normalize2(Float v[2]) const {
+template <typename Float, int SampleSize>
+void Perlin<Float, SampleSize>::normalize2(Float v[2]) const {
   Float s;
 
   s = sqrt(v[0] * v[0] + v[1] * v[1]);
@@ -465,8 +796,8 @@ void Perlin<Float>::normalize2(Float v[2]) const {
   }
 }
 
-template <typename Float>
-void Perlin<Float>::normalize3(Float v[3]) const {
+template <typename Float, int SampleSize>
+void Perlin<Float, SampleSize>::normalize3(Float v[3]) const {
   Float s;
 
   s = sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
@@ -481,48 +812,8 @@ void Perlin<Float>::normalize3(Float v[3]) const {
   }
 }
 
-template <typename Float>
-void Perlin<Float>::init(uint64_t seed) {
-  RandomSource randomSource(seed);
-
-  p.reset(new int[PerlinSampleSize + PerlinSampleSize + 2]);
-  g3.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2][3]);
-  g2.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2][2]);
-  g1.reset(new Float[PerlinSampleSize + PerlinSampleSize + 2]);
-
-  int i, j, k;
-
-  for (i = 0; i < PerlinSampleSize; i++) {
-    p[i] = i;
-    g1[i] = (Float)(randomSource.randInt(-PerlinSampleSize, PerlinSampleSize)) / PerlinSampleSize;
-
-    for (j = 0; j < 2; j++)
-      g2[i][j] = (Float)(randomSource.randInt(-PerlinSampleSize, PerlinSampleSize)) / PerlinSampleSize;
-    normalize2(g2[i]);
-
-    for (j = 0; j < 3; j++)
-      g3[i][j] = (Float)(randomSource.randInt(-PerlinSampleSize, PerlinSampleSize)) / PerlinSampleSize;
-    normalize3(g3[i]);
-  }
-
-  while (--i) {
-    k = p[i];
-    p[i] = p[j = randomSource.randUInt(PerlinSampleSize - 1)];
-    p[j] = k;
-  }
-
-  for (i = 0; i < PerlinSampleSize + 2; i++) {
-    p[PerlinSampleSize + i] = p[i];
-    g1[PerlinSampleSize + i] = g1[i];
-    for (j = 0; j < 2; j++)
-      g2[PerlinSampleSize + i][j] = g2[i][j];
-    for (j = 0; j < 3; j++)
-      g3[PerlinSampleSize + i][j] = g3[i][j];
-  }
-}
-
-template <typename Float>
-inline Float Perlin<Float>::perlin(Float x) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::perlin(Float x) const {
   int i;
   Float val, sum = 0;
   Float p, scale = 1;
@@ -537,8 +828,8 @@ inline Float Perlin<Float>::perlin(Float x) const {
   return sum * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::perlin(Float x, Float y) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::perlin(Float x, Float y) const {
   int i;
   Float val, sum = 0;
   Float p[2], scale = 1;
@@ -555,8 +846,8 @@ inline Float Perlin<Float>::perlin(Float x, Float y) const {
   return sum * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::perlin(Float x, Float y, Float z) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::perlin(Float x, Float y, Float z) const {
   int i;
   Float val, sum = 0;
   Float p[3], scale = 1;
@@ -576,8 +867,8 @@ inline Float Perlin<Float>::perlin(Float x, Float y, Float z) const {
   return sum * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::ridgedMulti(Float x) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::ridgedMulti(Float x) const {
   Float val, sum = 0;
   Float scale = 1;
   Float weight = 1.0;
@@ -600,8 +891,8 @@ inline Float Perlin<Float>::ridgedMulti(Float x) const {
   return ((sum * 1.25) - 1.0) * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::ridgedMulti(Float x, Float y) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::ridgedMulti(Float x, Float y) const {
   Float val, sum = 0;
   Float p[2], scale = 1;
   Float weight = 1.0;
@@ -626,8 +917,8 @@ inline Float Perlin<Float>::ridgedMulti(Float x, Float y) const {
   return ((sum * 1.25) - 1.0) * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::ridgedMulti(Float x, Float y, Float z) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::ridgedMulti(Float x, Float y, Float z) const {
   Float val, sum = 0;
   Float p[3], scale = 1;
   Float weight = 1.0;
@@ -654,8 +945,8 @@ inline Float Perlin<Float>::ridgedMulti(Float x, Float y, Float z) const {
   return ((sum * 1.25) - 1.0) * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::billow(Float x) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::billow(Float x) const {
   Float val, sum = 0;
   Float p, scale = 1;
 
@@ -671,8 +962,8 @@ inline Float Perlin<Float>::billow(Float x) const {
   return (sum + 0.5) * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::billow(Float x, Float y) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::billow(Float x, Float y) const {
   Float val, sum = 0;
   Float p[2], scale = 1;
 
@@ -690,8 +981,8 @@ inline Float Perlin<Float>::billow(Float x, Float y) const {
   return (sum + 0.5) * m_amplitude + m_bias;
 }
 
-template <typename Float>
-inline Float Perlin<Float>::billow(Float x, Float y, Float z) const {
+template <typename Float, int SampleSize>
+inline Float Perlin<Float, SampleSize>::billow(Float x, Float y, Float z) const {
   Float val, sum = 0;
   Float p[3], scale = 1;
 

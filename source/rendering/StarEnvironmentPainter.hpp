@@ -66,7 +66,7 @@ private:
   AssetTextureGroupPtr m_textureGroup;
 
   double m_timer;
-  PerlinF m_rayPerlin;
+  DeterministicFloatF m_rayPerlin;
 
   uint64_t m_starsHash{};
   List<TexturePtr> m_starTextures;

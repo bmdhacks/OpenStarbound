@@ -144,7 +144,7 @@ protected:
 
     Map<String, SystemType> systemTypes;
 
-    PerlinD systemTypePerlin;
+    DeterministicFloatD systemTypePerlin;
     Json systemTypeBins;
 
     StringMap<PlanetaryType> planetaryTypes;

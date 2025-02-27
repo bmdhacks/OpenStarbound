@@ -19,7 +19,7 @@ RidgeBlocksSelector::RidgeBlocksSelector(Json const& config, TerrainSelectorPara
   RandomSource random(parameters.seed);
   ridgePerlin1 = PerlinF(PerlinType::RidgedMulti, 2, frequency, amplitude, 0, 2.0f, 2.0f, random.randu64());
   ridgePerlin2 = PerlinF(PerlinType::RidgedMulti, 2, frequency, amplitude, 0, 2.0f, 2.0f, random.randu64());
-  noisePerlin = PerlinF(1, noiseFrequency, noiseAmplitude, 0, 1.0f, 2.0f, random.randu64());
+  noisePerlin = VisualPerlinF(1, noiseFrequency, noiseAmplitude, 0, 1.0f, 2.0f, random.randu64());
 }
 
 float RidgeBlocksSelector::get(int x, int y) const {
