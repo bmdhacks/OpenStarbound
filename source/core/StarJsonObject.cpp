@@ -62,8 +62,8 @@ pair<JsonObjectConstIterator, bool> JsonObject::add(String const& key, Json cons
     return pair;
 }
 
-List<pair<String, Json>> JsonObject::pairs() {
-  List<pair<String, mapped_type>> plist;
+List<pair<String, const Json>> JsonObject::pairs() {
+  List<pair<String, const mapped_type>> plist;
   for (auto const& kv : m_map)
     plist.push_back(make_pair(kv.first.toString(), kv.second));
   return plist;
@@ -76,7 +76,7 @@ bool JsonObject::erase(String const& key) {
   return n > 0;
 }
 
-pair<String, Json> JsonObject::first() const {
+pair<String, const Json> JsonObject::first() const {
   auto it = m_map.begin();
   if (it == m_map.end())
     throw StarException("JsonObject::first() called on empty object");
@@ -118,7 +118,7 @@ bool JsonObject::merge(StringMap<Json> const& sourceMap, bool overwrite) {
     if (!res.second) {
       noCommonKeys = false;
       if (overwrite) {
-        res.first->second = kv.second;
+        set(kv.first, kv.second);
       }
     }
   }

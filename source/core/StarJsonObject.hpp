@@ -23,7 +23,7 @@ class JsonObjectConstIterator {
 public:
     using iterator_category = std::forward_iterator_tag;
     using difference_type = std::ptrdiff_t;
-    using value_type = std::pair<String, Json>;
+    using value_type = const std::pair<String, Json>;
     using pointer = value_type*;
     using reference = value_type;
 
@@ -85,9 +85,9 @@ public:
   bool empty() const;
   bool remove(String const& key);
   pair<JsonObjectConstIterator, bool> add(String const& key, Json const& value);
-  List<pair<String, Json>> pairs();
+  List<pair<String, const Json>> pairs();
   bool erase(String const& key);
-  pair<String, Json> first() const;
+  pair<String, const Json> first() const;
   List<String> keys() const;
   List<Json> values() const;
   bool contains(String const& key) const;
