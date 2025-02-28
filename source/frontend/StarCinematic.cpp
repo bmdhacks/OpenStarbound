@@ -32,7 +32,7 @@ void Cinematic::load(Json const& definition) {
   for (auto cameraDefinition : definition.getArray("camera", JsonArray())) {
     CameraKeyFrame keyFrame;
     keyFrame.timecode = cameraDefinition.getFloat("timecode");
-    keyFrame.zoom = cameraDefinition.getFloat("zoom", 1.0f);
+    keyFrame.zoom = cameraDefinition.getFloat("zoom", 1.5f);
     if (cameraDefinition.contains("pan"))
       keyFrame.pan = jsonToVec2F(cameraDefinition.get("pan"));
     m_cameraKeyFrames.append(keyFrame);
@@ -52,6 +52,10 @@ void Cinematic::load(Json const& definition) {
     panel->startTime = panelDefinition.getFloat("startTime", 0);
     panel->endTime = panelDefinition.getFloat("endTime", 0);
     panel->loopTime = panelDefinition.getFloat("loopTime", 0);
+
+    if (panel->textStyle.fontSize==8) // portmaster increase smallest font
+      panel->textStyle.fontSize=24;
+    
     for (auto keyframeDefinition : panelDefinition.getArray("keyframes")) {
       KeyFrame keyframe;
       keyframe.timecode = keyframeDefinition.getFloat("timecode");
