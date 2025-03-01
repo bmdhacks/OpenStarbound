@@ -5,6 +5,8 @@
 #include "StarString.hpp"
 #include "StarLogging.hpp"
 #include "StarDataStream.hpp"
+#include "StarArray.hpp"
+#include <cstddef>
 
 namespace Star {
 
@@ -21,45 +23,44 @@ struct InternedKeyHash {
 
 class JsonObjectConstIterator {
 public:
-    using iterator_category = std::forward_iterator_tag;
-    using difference_type = std::ptrdiff_t;
-    using value_type = const std::pair<String, Json>;
-    using pointer = value_type*;
-    using reference = value_type;
+  using iterator_category = std::forward_iterator_tag;
+  using difference_type = std::ptrdiff_t;
+  using value_type = const std::pair<String, Json>;
+  using pointer = shared_ptr<value_type>;
+  using reference = value_type;
 
-    JsonObjectConstIterator();
-    ~JsonObjectConstIterator();
+  JsonObjectConstIterator() = default;
     
-    // No copy constructor or assignment as it would require Json definition
-    JsonObjectConstIterator(JsonObjectConstIterator const& other);
-    JsonObjectConstIterator& operator=(JsonObjectConstIterator const& other);
+  // No copy constructor or assignment as it would require Json definition
+  JsonObjectConstIterator(JsonObjectConstIterator const& other);
+  JsonObjectConstIterator& operator=(JsonObjectConstIterator const& other);
     
-    // Move semantics
-    JsonObjectConstIterator(JsonObjectConstIterator&& other) noexcept;
-    JsonObjectConstIterator& operator=(JsonObjectConstIterator&& other) noexcept;
+  // Move semantics
+  JsonObjectConstIterator(JsonObjectConstIterator&& other) noexcept;
+  JsonObjectConstIterator& operator=(JsonObjectConstIterator&& other) noexcept;
     
-    JsonObjectConstIterator& operator++();
-    JsonObjectConstIterator operator++(int);
+  JsonObjectConstIterator& operator++();
+  JsonObjectConstIterator operator++(int);
     
-    bool operator==(JsonObjectConstIterator const& rhs) const;
-    bool operator!=(JsonObjectConstIterator const& rhs) const;
+  bool operator==(JsonObjectConstIterator const& rhs) const;
+  bool operator!=(JsonObjectConstIterator const& rhs) const;
     
-    // These will be implemented in the .cpp file where Json is fully defined
-    reference operator*() const;
-    pointer operator->() const;
+  // These will be implemented in the .cpp file where Json is fully defined
+  reference operator*() const;
+  pointer operator->() const;
 
-    // This is used by JsonObject::erase
-    StringInterner::InternedString internedKey() const;
+  // This is used by JsonObject::erase
+  StringInterner::InternedString internedKey() const;
 
 private:
-    friend class JsonObject;
+  friend class JsonObject;
+
+  List<StringInterner::InternedString> m_keys;
+  size_t m_index;
+  const JsonObject* m_parentObj;
     
-    // Implementation details are hidden
-    struct Impl;
-    Impl* m_impl;
-    
-    // Private constructor used by JsonObject.  baseIterator is an InternalMap::iterator
-    explicit JsonObjectConstIterator(void* baseIterator);
+  // Private constructor used by JsonObject.  prevKey is the key of the previous element
+  explicit JsonObjectConstIterator(List<StringInterner::InternedString> keys, size_t index, const JsonObject* parentObj);
 };
 
 class JsonObject {
@@ -70,6 +71,7 @@ public:
   using InternalMap = HashMap<StringInterner::InternedString, Json, InternedKeyHash>;
   using const_iterator = JsonObjectConstIterator;
 
+  // don't use these they're wasteful
   pair<JsonObjectConstIterator, bool> insert(pair<String, Json> const& p);
   pair<JsonObjectConstIterator, bool> insert(String const& k, Json const& v);
 
