@@ -661,7 +661,7 @@ void ItemDatabase::scanItems() {
 void ItemDatabase::addObjectItems() {
   auto objectDatabase = Root::singleton().objectDatabase();
 
-  Root::singleton().assets()->setCaching(Assets::CacheStragegy::Heuristic);
+  //  Root::singleton().assets()->setCaching(Assets::CacheStragegy::Heuristic);
 
   for (auto const& objectName : objectDatabase->allObjects()) {
     auto objectConfig = objectDatabase->getConfig(objectName);
@@ -671,7 +671,7 @@ void ItemDatabase::addObjectItems() {
   }
 
   // enable the cache after the database is loaded
-  Root::singleton().assets()->setCaching(Assets::CacheStragegy::Heuristic);
+  //  Root::singleton().assets()->setCaching(Assets::CacheStragegy::Heuristic);
 }
 
 void ItemDatabase::scanRecipes() {
