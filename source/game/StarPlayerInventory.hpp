@@ -39,7 +39,7 @@ STAR_EXCEPTION(InventoryException, StarException);
 class PlayerInventory : public NetElementSyncGroup {
 public:
   // Whether the given item is allowed to go in the given slot type
-  static bool itemAllowedInBag(ItemPtr const& item, String const& bagType);
+  bool itemAllowedInBag(ItemPtr const& item, String const& bagType) const;
   static bool itemAllowedAsEquipment(ItemPtr const& item, EquipmentSlot equipmentSlot);
 
   PlayerInventory();
@@ -190,7 +190,7 @@ public:
 private:
   typedef pair<Maybe<InventorySlot>, Maybe<InventorySlot>> CustomBarLink;
 
-  static bool checkInventoryFilter(ItemPtr const& items, String const& filterName);
+  bool checkInventoryFilter(ItemPtr const& items, String const& filterName) const;
 
   ItemPtr const& retrieve(InventorySlot const& slot) const;
   ItemPtr& retrieve(InventorySlot const& slot);
@@ -200,6 +200,8 @@ private:
 
   void netElementsNeedLoad(bool full) override;
   void netElementsNeedStore() override;
+
+  Json m_playerInventoryFilters;
 
   Map<EquipmentSlot, ItemPtr> m_equipment;
   Map<String, ItemBagPtr> m_bags;

@@ -13,7 +13,7 @@
 
 namespace Star {
 
-bool PlayerInventory::itemAllowedInBag(ItemPtr const& items, String const& bagType) {
+bool PlayerInventory::itemAllowedInBag(ItemPtr const& items, String const& bagType) const {
   // any inventory type can have empty slots
   if (!items)
     return true;
@@ -57,6 +57,8 @@ PlayerInventory::PlayerInventory() {
   size_t customBarIndexes = config.getUInt("customBarIndexes");
   m_customBarGroup = 0;
   m_customBar.resize(customBarGroups, customBarIndexes);
+
+  m_playerInventoryFilters = Root::singleton().assets()->json("/player.config:inventoryFilters");
 
   addNetElement(&m_equipmentNetState[EquipmentSlot::Head]);
   addNetElement(&m_equipmentNetState[EquipmentSlot::Chest]);
@@ -942,7 +944,7 @@ void PlayerInventory::cleanup() {
     });
 }
 
-bool PlayerInventory::checkInventoryFilter(ItemPtr const& items, String const& filterName) {
+bool PlayerInventory::checkInventoryFilter(ItemPtr const& items, String const& filterName) const {
   Json filterConfig;
 
   auto itemFilters = items->instanceValue("inventoryFilters");
@@ -953,10 +955,9 @@ bool PlayerInventory::checkInventoryFilter(ItemPtr const& items, String const& f
   }
 
   if (!filterConfig.isType(Json::Type::Object)) {
-    auto config = Root::singleton().assets()->json("/player.config:inventoryFilters");
-    filterConfig = config.opt(filterName).value();
+    filterConfig = m_playerInventoryFilters.opt(filterName).value();
     if (!filterConfig.isType(Json::Type::Object))
-      filterConfig = config.get("default");
+      filterConfig = m_playerInventoryFilters.get("default");
   }
 
   // filter by item type if an itemTypes filter is set
