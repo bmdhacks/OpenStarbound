@@ -323,6 +323,10 @@ public:
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #endif
 
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+    SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+
     m_sdlGlContext = SDL_GL_CreateContext(m_sdlWindow);
     if (!m_sdlGlContext)
       throw ApplicationException::format("Application: Could not create OpenGL context: {}", SDL_GetError());

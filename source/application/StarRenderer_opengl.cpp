@@ -351,14 +351,21 @@ void OpenGlRenderer::setScissorRect(Maybe<RectI> const& scissorRect) {
 }
 
 void OpenGlRenderer::setEffectScriptableParameter(String const& effectName, String const& parameterName, RenderEffectParameter const& parameter) {
-	return;
+  (void)effectName;
+  (void)parameterName;
+  (void)parameter;
+  return;
 }
 
 Maybe<RenderEffectParameter> OpenGlRenderer::getEffectScriptableParameter(String const& effectName, String const& parameterName) {
+  (void)effectName;
+  (void)parameterName;
   return Maybe<RenderEffectParameter>();
 }
 
 Maybe<VariantTypeIndex> OpenGlRenderer::getEffectScriptableParameterType(String const& effectName, String const& parameterName) {
+  (void)effectName;
+  (void)parameterName;
   return Maybe<VariantTypeIndex>();
 }
 
@@ -416,6 +423,7 @@ void OpenGlRenderer::renderBuffer(RenderBufferPtr const& renderBuffer, Mat3F con
 }
 
 void OpenGlRenderer::flush(Mat3F const& transformation) {
+  (void)transformation;
   flushImmediatePrimitives();
 }
 
@@ -662,7 +670,7 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
 
     auto textureIndex = currentTextures.indexOf(glTextureId);
     if (textureIndex == NPos) {
-      if (currentTextures.size() >= textureCount)
+      if (currentTextures.size() >= 4)
         finishCurrentBuffer();
 
       textureIndex = currentTextures.size();
