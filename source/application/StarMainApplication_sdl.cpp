@@ -327,6 +327,9 @@ public:
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
 
+    SDL_GL_SwapWindow(m_sdlWindow);
+    SDL_GL_SwapWindow(m_sdlWindow);
+
     m_sdlGlContext = SDL_GL_CreateContext(m_sdlWindow);
     if (!m_sdlGlContext)
       throw ApplicationException::format("Application: Could not create OpenGL context: {}", SDL_GetError());
