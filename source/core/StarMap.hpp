@@ -112,6 +112,7 @@ auto MapMixin<BaseMap>::from(MapType const& m) -> MapMixin {
 template <typename BaseMap>
 auto MapMixin<BaseMap>::keys() const -> List<key_type> {
   List<key_type> klist;
+  klist.reserve(Base::size());
   for (const_iterator i = Base::begin(); i != Base::end(); ++i)
     klist.push_back(i->first);
   return klist;
@@ -120,6 +121,7 @@ auto MapMixin<BaseMap>::keys() const -> List<key_type> {
 template <typename BaseMap>
 auto MapMixin<BaseMap>::values() const -> List<mapped_type> {
   List<mapped_type> vlist;
+  vlist.reserve(Base::size());
   for (const_iterator i = Base::begin(); i != Base::end(); ++i)
     vlist.push_back(i->second);
   return vlist;
@@ -128,6 +130,7 @@ auto MapMixin<BaseMap>::values() const -> List<mapped_type> {
 template <typename BaseMap>
 auto MapMixin<BaseMap>::pairs() const -> List<pair<key_type, mapped_type>> {
   List<pair<key_type, mapped_type>> plist;
+  plist.reserve(Base::size());
   for (const_iterator i = Base::begin(); i != Base::end(); ++i)
     plist.push_back(*i);
   return plist;

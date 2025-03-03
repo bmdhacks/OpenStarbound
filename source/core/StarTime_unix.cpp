@@ -61,24 +61,17 @@ struct MonotonicClock {
 #else
 
 struct MonotonicClock {
-  MonotonicClock() {
-    timespec ts;
-    clock_getres(CLOCK_MONOTONIC, &ts);
-    starAssert(ts.tv_sec == 0);
-    storedFrequency = 1'000'000'000 / ts.tv_nsec;
-  };
-
   int64_t ticks() const {
     timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return ts.tv_sec * storedFrequency + ts.tv_nsec * storedFrequency / 1'000'000'000;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return ts.tv_sec * storedFrequency + ts.tv_nsec;
   }
 
   int64_t frequency() const {
     return storedFrequency;
   }
 
-  int64_t storedFrequency;
+  inline static const int64_t storedFrequency=1'000'000'000;
 };
 
 #endif

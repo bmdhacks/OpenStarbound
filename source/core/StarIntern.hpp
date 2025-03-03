@@ -3,7 +3,10 @@
 #include "StarString.hpp"
 #include "StarThread.hpp"
 
+#include <functional>
+#include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
@@ -99,7 +102,7 @@ public:
     // 3. Look up in dynamic map
     {
       ReadLocker readLocker(m_dynamicMutex);
-      auto it = m_dynamicMap.find(s);
+      auto it = m_dynamicMap.find(s.utf8());
       if (it != m_dynamicMap.end()) {
         // Already interned
         return InternedString{ it->second };
@@ -109,14 +112,14 @@ public:
       WriteLocker writeLocker(m_dynamicMutex);
 
       // gotta look one more time in case somebody outraced us
-      auto it = m_dynamicMap.find(s);
+      auto it = m_dynamicMap.find(s.utf8());
       if (it != m_dynamicMap.end()) {
         return InternedString{ it->second };
       }
 
       uint32_t newId = s_dynamicBase + static_cast<uint32_t>(m_dynamicStorage.size());
-      m_dynamicStorage.push_back(s);       // store in our vector
-      m_dynamicMap[s] = newId;            // record in our map
+      m_dynamicStorage.emplace_back(s);       // store in our vector
+      m_dynamicMap[s.utf8()] = newId;            // record in our map
       return InternedString{ newId };
     }
   }
@@ -179,6 +182,11 @@ private:
   // Private constructor for singleton
   StringInterner()
   {
+    // The entire assets subsystem has about 14,000 unique keys but a given
+    // game run only loads about 10k of them
+    m_dynamicMap.reserve(10000);
+    m_dynamicStorage.resize(10000);
+    
     // Initialize m_fixedKeys in the same order as IDs
     initializeFixedKeymap({
         "rotation", "properties", "id", "visible", "height",
@@ -240,7 +248,8 @@ private:
   // For dynamic strings - aka unwashed masses
   mutable ReadersWriterMutex m_dynamicMutex; // guard the dynamic storage with read/write mutex
   std::vector<String> m_dynamicStorage; // index = ID - s_dynamicBase
-  HashMap<String, uint32_t> m_dynamicMap;
+  std::unordered_map<std::string, uint32_t> m_dynamicMap;
+
 };
 
 }
