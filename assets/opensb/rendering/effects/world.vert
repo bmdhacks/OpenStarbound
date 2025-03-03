@@ -1,5 +1,5 @@
 #version 100
-precision mediump float;
+precision highp float;
 
 uniform vec2 textureSize0;
 uniform vec2 textureSize1;
@@ -16,14 +16,14 @@ attribute vec2 vertexTextureCoordinate;
 attribute vec4 vertexColor;
 attribute float vertexData; // textureIndex (bits 0-1), lightMapMultiplier (bit 2)
 
-varying vec2 fragmentTextureCoordinate;
+varying highp vec2 fragmentTextureCoordinate;
 varying float fragmentTextureIndex;
-varying vec4 fragmentColor;
+varying mediump vec4 fragmentColor;
 varying float fragmentLightMapMultiplier; 
-varying vec2 fragmentLightMapCoordinate;
+varying mediump vec2 fragmentLightMapCoordinate;
 
 void main() {
-    // Unpack data
+  // Unpack data
   float textureIndex = mod(vertexData, 4.0); // Bits 0-1
   float lightMapMultiplier = step(4.0, vertexData); // Bit 2
   
@@ -32,18 +32,21 @@ void main() {
   
   fragmentTextureIndex = textureIndex;
   fragmentLightMapMultiplier = lightMapMultiplier;
-  fragmentLightMapCoordinate = (screenPosition / lightMapScale) - lightMapOffset * lightMapSize / screenSize;
+  // Apply 2x scale factor for half-sized lightmap textures
+  fragmentLightMapCoordinate = (screenPosition / (lightMapScale * 2.0)) - lightMapOffset * lightMapSize / screenSize;
   
-  // Texture coordinate selection
-  if (textureIndex > 2.9) {
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize3;
-  } else if (textureIndex > 1.9) {
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize2;
-  } else if (textureIndex > 0.9) {
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize1;
+  // More efficient texture coordinate calculation
+  vec2 invSize;
+  if (textureIndex < 0.5) {
+    invSize = 1.0 / textureSize0;
+  } else if (textureIndex < 1.5) {
+    invSize = 1.0 / textureSize1;
+  } else if (textureIndex < 2.5) {
+    invSize = 1.0 / textureSize2;
   } else {
-    fragmentTextureCoordinate = vertexTextureCoordinate / textureSize0;
+    invSize = 1.0 / textureSize3;
   }
+  fragmentTextureCoordinate = vertexTextureCoordinate * invSize;
   
   fragmentColor = vertexColor;
   gl_Position = vec4((screenPosition / screenSize) * 2.0 - 1.0, 0.0, 1.0);

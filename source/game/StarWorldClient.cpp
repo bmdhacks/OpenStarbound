@@ -1411,7 +1411,8 @@ bool WorldClient::waitForLighting(WorldRenderData* renderData) {
   if (renderData && !m_lightMap.empty()) {
     for (auto& previewTile : m_previewTiles) {
       if (previewTile.updateLight) {
-        Vec2I lightArrayPos = m_geometry.diff(previewTile.position, m_lightMinPosition);
+        // Divide by 2 to account for half-sized lightmap
+        Vec2I lightArrayPos = (m_geometry.diff(previewTile.position, m_lightMinPosition) / 2);
         if (lightArrayPos[0] >= 0 && lightArrayPos[0] < (int)m_lightMap.width()
          && lightArrayPos[1] >= 0 && lightArrayPos[1] < (int)m_lightMap.height())
           m_lightMap.set(lightArrayPos[0], lightArrayPos[1], previewTile.light);

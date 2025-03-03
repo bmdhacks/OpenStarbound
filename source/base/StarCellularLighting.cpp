@@ -89,18 +89,43 @@ void CellularLightingCalculator::calculate(Image& output) {
   else
     m_lightArray.left().calculate(arrayMin[0], arrayMin[1], arrayMax[0], arrayMax[1]);
 
-  output.reset(arrayMax[0] - arrayMin[0], arrayMax[1] - arrayMin[1], PixelFormat::RGB24);
+  // Create half-sized lighting texture
+  size_t halfWidth = (arrayMax[0] - arrayMin[0] + 1) / 2;
+  size_t halfHeight = (arrayMax[1] - arrayMin[1] + 1) / 2;
+  output.reset(halfWidth, halfHeight, PixelFormat::RGB24);
 
   if (m_monochrome) {
-    for (size_t x = arrayMin[0]; x < arrayMax[0]; ++x) {
-      for (size_t y = arrayMin[1]; y < arrayMax[1]; ++y) {
-        output.set24(x - arrayMin[0], y - arrayMin[1], Color::grayf(m_lightArray.right().getLight(x, y)).toRgb());
+    for (size_t hx = 0; hx < halfWidth; ++hx) {
+      for (size_t hy = 0; hy < halfHeight; ++hy) {
+        // Sample 4 pixels from the original size and average them
+        size_t x0 = arrayMin[0] + hx * 2;
+        size_t y0 = arrayMin[1] + hy * 2;
+        size_t x1 = min(x0 + 1, arrayMax[0] - 1);
+        size_t y1 = min(y0 + 1, arrayMax[1] - 1);
+        
+        float light = (m_lightArray.right().getLight(x0, y0) +
+                       m_lightArray.right().getLight(x1, y0) +
+                       m_lightArray.right().getLight(x0, y1) +
+                       m_lightArray.right().getLight(x1, y1)) / 4.0f;
+                       
+        output.set24(hx, hy, Color::grayf(light).toRgb());
       }
     }
   } else {
-    for (size_t x = arrayMin[0]; x < arrayMax[0]; ++x) {
-      for (size_t y = arrayMin[1]; y < arrayMax[1]; ++y) {
-        output.set24(x - arrayMin[0], y - arrayMin[1], Color::v3fToByte(m_lightArray.left().getLight(x, y)));
+    for (size_t hx = 0; hx < halfWidth; ++hx) {
+      for (size_t hy = 0; hy < halfHeight; ++hy) {
+        // Sample 4 pixels from the original size and average them
+        size_t x0 = arrayMin[0] + hx * 2;
+        size_t y0 = arrayMin[1] + hy * 2;
+        size_t x1 = min(x0 + 1, arrayMax[0] - 1);
+        size_t y1 = min(y0 + 1, arrayMax[1] - 1);
+        
+        Vec3F light = (m_lightArray.left().getLight(x0, y0) +
+                       m_lightArray.left().getLight(x1, y0) +
+                       m_lightArray.left().getLight(x0, y1) +
+                       m_lightArray.left().getLight(x1, y1)) / 4.0f;
+                       
+        output.set24(hx, hy, Color::v3fToByte(light));
       }
     }
   }
@@ -110,7 +135,10 @@ void CellularLightingCalculator::setupImage(Image& image, PixelFormat format) co
   Vec2S arrayMin = Vec2S(m_queryRegion.min() - m_calculationRegion.min());
   Vec2S arrayMax = Vec2S(m_queryRegion.max() - m_calculationRegion.min());
 
-  image.reset(arrayMax[0] - arrayMin[0], arrayMax[1] - arrayMin[1], format);
+  // Create half-sized image
+  size_t halfWidth = (arrayMax[0] - arrayMin[0] + 1) / 2;
+  size_t halfHeight = (arrayMax[1] - arrayMin[1] + 1) / 2;
+  image.reset(halfWidth, halfHeight, format);
 }
 
 void CellularLightIntensityCalculator::setParameters(Json const& config) {

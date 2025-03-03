@@ -88,6 +88,8 @@ void WorldPainter::render(WorldRenderData& renderData, function<bool()> lightWai
       m_renderer->setEffectTexture("lightMap", renderData.lightMap);
     }
     m_renderer->setEffectParameter("lightMapMultiplier", m_assets->json("/rendering.config:lightMapMultiplier").toFloat());
+    // Use the original scale even though the lightmap is half-sized
+    // The vertex shader will apply the 2x factor to compensate
     m_renderer->setEffectParameter("lightMapScale", Vec2F::filled(TilePixels * m_camera.pixelRatio()));
     m_renderer->setEffectParameter("lightMapOffset", m_camera.worldToScreen(Vec2F(renderData.lightMinPosition)));
   }
