@@ -3,6 +3,7 @@
 #include "StarString.hpp"
 #include "StarThread.hpp"
 
+#include <string>
 #include <vector>
 #include <cstdint>
 #include <stdexcept>
@@ -23,6 +24,32 @@ public:
   static StringInterner& instance() {
     static StringInterner s_instance;
     return s_instance;
+  }
+
+  // debug stuff
+  static String dump() {
+    String dump;
+
+    dump.append("FIXED KEYS:\n");
+    for (auto k : *instance().m_fixedKeys) {
+      dump.append(k + "\n");
+    }
+    dump.append("\nFIXED KEYMAP\n");
+    for (auto kv : *instance().m_fixedKeyMap) {
+      dump.append(kv.first + " : " + kv.second + "\n");
+    }
+
+    dump.append("\nDYNAMIC KEYS:\n");
+    for (auto k : instance().m_dynamicStorage) {
+      dump.append(k + "\n");
+    }
+    dump.append("\nDYNAMIC KEYMAP\n");
+    for (auto kv : instance().m_dynamicMap) {
+      dump.append(kv.first + " : " + std::to_string(kv.second) + "\n");
+    }
+
+    printf("%s\n", dump.utf8Ptr());
+    return dump;
   }
 
   // A lightweight handle to the interned string
@@ -77,11 +104,16 @@ public:
         // Already interned
         return InternedString{ it->second };
       }
-    }
-
-    // Insert it
-    {
+    } // there is a race here
+    { // unfortunately no way to upgrade the read lock
       WriteLocker writeLocker(m_dynamicMutex);
+
+      // gotta look one more time in case somebody outraced us
+      auto it = m_dynamicMap.find(s);
+      if (it != m_dynamicMap.end()) {
+        return InternedString{ it->second };
+      }
+
       uint32_t newId = s_dynamicBase + static_cast<uint32_t>(m_dynamicStorage.size());
       m_dynamicStorage.push_back(s);       // store in our vector
       m_dynamicMap[s] = newId;            // record in our map
@@ -142,7 +174,6 @@ private:
     // unique_ptr<const HashMap<...>> through move assignment
     m_fixedKeyMap = std::move(tempMap);
     m_fixedKeys = std::move(tempKeys);
-    m_fixedKeyMapInitialized.store(true, std::memory_order_release);
   }
 
   // Private constructor for singleton
@@ -203,7 +234,6 @@ private:
   // create a fixed keymap that is not wrapped in a mutex allowing
   // fast parallel reads for the general purpose.  Combined with
   // numeric fields, this allows for mutex-free interning in most cases
-  std::atomic<bool> m_fixedKeyMapInitialized{false};  // true after initialization
   std::unique_ptr<const std::vector<String>> m_fixedKeys; // index = ID - s_fixedBase
   std::unique_ptr<const HashMap<String, InternedString>> m_fixedKeyMap;
 
