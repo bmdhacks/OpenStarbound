@@ -9,11 +9,11 @@ namespace Star {
 // these are for completenes but are super wasteful
 pair<JsonObjectConstIterator, bool> JsonObject::insert(pair<String, Json> const& p) {
   auto result = m_map.insert(make_pair(StringInterner::instance().intern(p.first), p.second));
-  return make_pair(find(p.first), result.second);
+  return make_pair(JsonObjectConstIterator(result.first), result.second);
 }
 pair<JsonObjectConstIterator, bool> JsonObject::insert(String const& k, Json const& v) {
   auto result = m_map.insert(make_pair(StringInterner::instance().intern(k), v));
-  return make_pair(find(k), result.second);
+  return make_pair(JsonObjectConstIterator(result.first), result.second);
 }
 
 JsonObject::JsonObject(std::initializer_list<std::pair<String, Json>> init) {
@@ -183,48 +183,41 @@ bool JsonObject::operator!=(JsonObject const& rhs) const {
 }
 
 JsonObjectConstIterator::JsonObjectConstIterator(JsonObjectConstIterator const& other)
-  : m_keys(other.m_keys), m_index(other.m_index), m_parentObj(other.m_parentObj) {}
+  : m_baseIterator(other.m_baseIterator) {}
 
 JsonObjectConstIterator& JsonObjectConstIterator::operator=(JsonObjectConstIterator const& other) {
     if (this != &other) {
-      m_keys = other.m_keys;
-      m_index = other.m_index;
-      m_parentObj = other.m_parentObj;
+      m_baseIterator=other.m_baseIterator;
     }
     return *this;
 }
 
 JsonObjectConstIterator::JsonObjectConstIterator(JsonObjectConstIterator&& other) noexcept
-  : m_keys(std::move(other.m_keys)), m_index(other.m_index), m_parentObj(other.m_parentObj) {
-  other.m_parentObj = nullptr;
-}
+  : m_baseIterator(std::move(other.m_baseIterator)) {}
 
 JsonObjectConstIterator& JsonObjectConstIterator::operator=(JsonObjectConstIterator&& other) noexcept {
     if (this != &other) {
-      m_keys = std::move(other.m_keys);
-      m_index = other.m_index;
-      m_parentObj = other.m_parentObj;
-      other.m_parentObj = nullptr;
+      m_baseIterator = other.m_baseIterator;
     }
     return *this;
 }
 
-JsonObjectConstIterator::JsonObjectConstIterator(List<StringInterner::InternedString> keys, size_t index, const JsonObject* parentObj)
-  : m_keys(keys), m_index(index), m_parentObj(parentObj) {}
+JsonObjectConstIterator::JsonObjectConstIterator(InternalMap::const_iterator baseIterator)
+  : m_baseIterator(baseIterator) {}
 
 JsonObjectConstIterator& JsonObjectConstIterator::operator++() {
-  ++m_index;
+  ++m_baseIterator;
   return *this;
 }
 
 JsonObjectConstIterator JsonObjectConstIterator::operator++(int) {
-    JsonObjectConstIterator temp(*this);
-    ++(*this);
-    return temp;
+  JsonObjectConstIterator temp(*this);
+  ++(*this);
+  return temp;
 }
 
 bool JsonObjectConstIterator::operator==(JsonObjectConstIterator const& rhs) const {
-  return m_parentObj==rhs.m_parentObj && m_index == rhs.m_index;
+  return m_baseIterator == rhs.m_baseIterator;
 }
 
 bool JsonObjectConstIterator::operator!=(JsonObjectConstIterator const& rhs) const {
@@ -232,30 +225,27 @@ bool JsonObjectConstIterator::operator!=(JsonObjectConstIterator const& rhs) con
 }
 
 StringInterner::InternedString JsonObjectConstIterator::internedKey() const {
-  return m_keys[m_index];
+  return m_baseIterator->first;
 }
 
 JsonObjectConstIterator::reference JsonObjectConstIterator::operator*() const {
-  String key = m_keys[m_index].toString();
-  return pair<String, Json>(key, m_parentObj->get(m_keys[m_index]));
+  String key = m_baseIterator->first.toString();
+  return pair<String, Json>(key, m_baseIterator->second);
 }
 
 JsonObjectConstIterator::pointer JsonObjectConstIterator::operator->() const {
-  String key = m_keys[m_index].toString();
-  return make_shared<pair<String, Json>>(key, m_parentObj->get(m_keys[m_index]));
+  String key = m_baseIterator->first.toString();
+  return make_shared<pair<String, Json>>(key, m_baseIterator->second);
 }
 
-Json& JsonObject::set(String const& key, Json const& value) { 
-  return (*this)[key] = value; 
+Json& JsonObject::set(String const& key, Json const& value) {
+  auto i = StringInterner::instance().intern(key);
+  return m_map.set(i, value);
 }
 
 Json const& JsonObject::get(String const& k) const {
-  auto p = ptr(k);
-  if (!p) {
-    throw StarException(strf("Key '%s' not found in JsonObject::get()", k));
-  } else {
-    return *p;
-  }
+  auto i = StringInterner::instance().intern(k);
+  return m_map.get(i);
 }
 
 Json JsonObject::value(String const& k) const {
@@ -281,35 +271,23 @@ Maybe<Json> JsonObject::maybe(String const& k) const {
 }
 
 Json const* JsonObject::ptr(String const& k) const {
-  auto it = find(k); // ephemeral pair
-  if (it == end()) {
-    return nullptr;
-  } else {
-    // return the base Json object that is not ephemeral
-    auto handle = StringInterner::instance().intern(k);
-    auto baseIt = m_map.find(handle);
-    return (baseIt == m_map.end()) ? nullptr : &baseIt->second;
-  }
+  auto i = StringInterner::instance().intern(k);
+  return m_map.ptr(i);
 }
 
 JsonObjectConstIterator JsonObject::begin() const {
-  return JsonObjectConstIterator(this->m_map.keys(), 0, this);
+  return JsonObjectConstIterator(m_map.begin());
 }
 
 JsonObjectConstIterator JsonObject::end() const {
-  return JsonObjectConstIterator(this->m_map.keys(), m_map.size(), this);
+  return JsonObjectConstIterator(m_map.end());
 }
 
 JsonObjectConstIterator JsonObject::find(String const& k) const {
-  auto keys = m_map.keys();
   auto handle = StringInterner::instance().intern(k);
-  size_t i = keys.indexOf(handle);
+  auto it = m_map.find(handle);
 
-  if (i == NPos) {
-    return end();
-  } else {
-    return JsonObjectConstIterator(keys, i, this);
-  }
+  return JsonObjectConstIterator(it);
 }
 
 bool JsonObject::erase(const_iterator it) {

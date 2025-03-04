@@ -21,6 +21,8 @@ struct InternedKeyHash {
   }
 };
 
+using InternalMap = HashMap<StringInterner::InternedString, Json, InternedKeyHash>;
+
 class JsonObjectConstIterator {
 public:
   using iterator_category = std::forward_iterator_tag;
@@ -54,13 +56,10 @@ public:
 
 private:
   friend class JsonObject;
-
-  List<StringInterner::InternedString> m_keys;
-  size_t m_index;
-  const JsonObject* m_parentObj;
+  InternalMap::const_iterator m_baseIterator;
     
   // Private constructor used by JsonObject.  prevKey is the key of the previous element
-  explicit JsonObjectConstIterator(List<StringInterner::InternedString> keys, size_t index, const JsonObject* parentObj);
+  explicit JsonObjectConstIterator(InternalMap::const_iterator baseIterator);
 };
 
 class JsonObject {
@@ -68,7 +67,6 @@ public:
   // pretend to be a map
   using key_type = String;
   using mapped_type = Json;
-  using InternalMap = HashMap<StringInterner::InternedString, Json, InternedKeyHash>;
   using const_iterator = JsonObjectConstIterator;
 
   // don't use these they're wasteful
@@ -122,6 +120,8 @@ public:
   Json const* ptr(String const& k) const;
  
 private:
+  friend class JsonObjectConstIterator;
+
   // This whole class is just a view of the actual InternedString -> Json
   InternalMap m_map;
 };
