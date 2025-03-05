@@ -72,7 +72,9 @@ TileDamageParameters::TileDamageParameters(Json config, Maybe<float> healthOverr
   if (config.type() == Json::Type::String)
     config = Root::singleton().assets()->json(config.toString());
 
-  for (auto const& pair : config.getObject("damageFactors"))
+  auto damageFactors = config.getObject("damageFactors");
+  m_damages.reserve(damageFactors.size());
+  for (auto const& pair : damageFactors)
     m_damages[TileDamageTypeNames.getLeft(pair.first)] = pair.second.toFloat();
   m_damageRecoveryPerSecond = config.getFloat("damageRecovery");
 
@@ -116,14 +118,16 @@ TileDamageParameters TileDamageParameters::sum(TileDamageParameters const& other
   result.m_requiredHarvestLevel = max(m_requiredHarvestLevel, other.m_requiredHarvestLevel);
   result.m_maximumEffectTime = max(m_maximumEffectTime, other.m_maximumEffectTime);
 
-  for (auto key : m_damages.keys()) {
+  for (auto const& pair : m_damages) {
+    auto key = pair.first;
     if (other.m_damages.contains(key))
       result.m_damages[key] = result.m_totalHealth / ((m_totalHealth / m_damages.value(key, 0)) + (other.m_totalHealth / other.m_damages.value(key, 0)));
     else
       result.m_damages[key] = m_damages.value(key, 0);
   }
 
-  for (auto key : m_damages.keys()) {
+  for (auto const& pair : m_damages) {
+    auto key = pair.first;
     if (m_damages.contains(key))
       result.m_damages[key] = result.m_totalHealth / ((m_totalHealth / m_damages.value(key, 0)) + (other.m_totalHealth / other.m_damages.value(key, 0)));
     else
@@ -135,7 +139,7 @@ TileDamageParameters TileDamageParameters::sum(TileDamageParameters const& other
 
 Json TileDamageParameters::toJson() const {
   return JsonObject{
-    {"damageFactors", jsonFromMapK<Map<TileDamageType, float>>(m_damages, [](TileDamageType a) {
+    {"damageFactors", jsonFromMapK<HashMap<TileDamageType, float>>(m_damages, [](TileDamageType a) {
         return TileDamageTypeNames.getRight(a);
       })},
     {"damageRecovery", m_damageRecoveryPerSecond},

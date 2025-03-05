@@ -69,7 +69,7 @@ public:
   friend DataStream& operator<<(DataStream& ds, TileDamageParameters const& tileDamage);
 
 private:
-  Map<TileDamageType, float> m_damages;
+  HashMap<TileDamageType, float> m_damages;
   float m_damageRecoveryPerSecond;
   float m_maximumEffectTime;
   float m_totalHealth;

@@ -48,7 +48,11 @@ auto Random2dPointGenerator<PointData, DataType>::generate(Poly const& area, Poi
   int64_t sectorXMax = std::ceil(bound.xMax() / m_cellSize);
   int64_t sectorYMax = std::ceil(bound.yMax() / m_cellSize);
 
+  // Pre-allocate memory based on expected number of sectors and density range
+  int64_t sectorCount = (sectorXMax - sectorXMin + 1) * (sectorYMax - sectorYMin + 1);
+  int64_t maxItemsPerSector = m_densityRange[1];
   PointSet finalResult;
+  finalResult.reserve(sectorCount * maxItemsPerSector);
   RandomSource sectorRandomness;
 
   for (int64_t x = sectorXMin; x <= sectorXMax; ++x) {
@@ -61,6 +65,7 @@ auto Random2dPointGenerator<PointData, DataType>::generate(Poly const& area, Poi
           PointSet sectorResult;
           sectorRandomness.init(staticRandomU64(m_seed, x, y));
           unsigned max = sectorRandomness.randInt(m_densityRange[0], m_densityRange[1]);
+          sectorResult.reserve(max);
           for (unsigned i = 0; i < max; ++i) {
             Point pointPos = Point(x + (DataType)sectorRandomness.randd(), y + (DataType)sectorRandomness.randd()) * m_cellSize;
             sectorResult.append(pair<Point, PointData>(pointPos, callback(sectorRandomness)));
