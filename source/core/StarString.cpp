@@ -292,23 +292,40 @@ StringList String::split(String const& pattern, size_t maxSplit) const {
   if (pattern.empty())
     return StringList(1, *this);
 
+  // Pre-allocate estimated space to avoid resizing
+  std::string_view source(m_string);
+  std::string_view delimiter(pattern.m_string);
+  
+  // Estimate split count for better allocation
+  size_t estimatedParts = 1;
+  if (maxSplit == NPos) {
+    size_t pos = 0;
+    while ((pos = source.find(delimiter, pos)) != std::string_view::npos) {
+      estimatedParts++;
+      pos += delimiter.size();
+    }
+  } else {
+    estimatedParts = maxSplit + 1;
+  }
+  ret.reserve(estimatedParts);
+
   size_t beg = 0;
   while (true) {
     if (ret.size() == maxSplit) {
-      ret.append(m_string.substr(beg));
+      // Use direct string construction instead of substr
+      ret.append(String(m_string.c_str() + beg, m_string.size() - beg));
       break;
     }
 
     size_t end = m_string.find(pattern.m_string, beg);
     if (end == NPos) {
-      ret.append(m_string.substr(beg));
+      ret.append(String(m_string.c_str() + beg, m_string.size() - beg));
       break;
     }
-    ret.append(m_string.substr(beg, end - beg));
+    ret.append(String(m_string.c_str() + beg, end - beg));
     beg = end + pattern.m_string.size();
   }
 
-  starAssert(maxSplit == NPos || ret.size() <= maxSplit + 1);
   return ret;
 }
 
