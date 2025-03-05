@@ -1,3 +1,5 @@
+#include <regex>
+
 #include "StarAssets.hpp"
 #include "StarAssetPath.hpp"
 #include "StarFile.hpp"
@@ -118,6 +120,10 @@ Assets::Assets(Settings settings, StringList assetSources) {
   m_settings = std::move(settings);
   m_stopThreads = false;
   m_assetSources = std::move(assetSources);
+
+  List<std::regex> compiledDigestIgnore;
+  for (auto const& pattern : m_settings.digestIgnore)
+    compiledDigestIgnore.emplace_back(pattern.utf8(), std::regex::ECMAScript);
 
   auto luaEngine = LuaEngine::create();
   m_luaEngine = luaEngine;
@@ -310,13 +316,14 @@ Assets::Assets(Settings settings, StringList assetSources) {
         return s.toLower();
       }).sorted()) {
     bool digestFile = true;
-    for (auto const& pattern : m_settings.digestIgnore) {
-      if (assetPath.regexMatch(pattern, false, false)) {
+
+    for (auto const& compiledPattern : compiledDigestIgnore) {
+      if (std::regex_search(assetPath.utf8(), compiledPattern)) {
         digestFile = false;
         break;
       }
     }
-
+    
     auto const& descriptor = m_files.get(assetPath);
 
     if (digestFile) {
