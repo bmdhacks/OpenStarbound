@@ -57,7 +57,7 @@ public:
 
   // A lightweight handle to the interned string
   struct InternedString {
-    uint32_t id;
+    uint16_t id;
     // Comparison operators, etc.
     bool operator==(const InternedString& other) const {
       return id == other.id;
@@ -71,9 +71,9 @@ public:
       return StringInterner::instance().lookup(*this);
     }
 
-    InternedString() : id(UINT32_MAX) {} // will fail lookup 
-    explicit operator bool() const { return id != UINT32_MAX; } // for good measure
-    InternedString(uint32_t id) : id(id) {}
+    InternedString() : id(UINT16_MAX) {} // will fail lookup 
+    explicit operator bool() const { return id != UINT16_MAX; } // for good measure
+    InternedString(uint16_t id) : id(id) {}
     InternedString(std::string const& s) : id(StringInterner::instance().intern(s).id) {}
     InternedString(String const& s) : id(StringInterner::instance().intern(s).id) {}
     InternedString(char const* s) : id(StringInterner::instance().intern(s).id) {}
@@ -90,7 +90,7 @@ public:
     // 1. Check if numeric and in range
     int numericValue = parseNumeric(s);
     if (numericValue >= 0 && numericValue <= 9999) {
-      return InternedString{ static_cast<uint32_t>(numericValue) };
+      return InternedString{ static_cast<uint16_t>(numericValue) };
     }
 
     // 2. Check if it's one of our fixed special strings
@@ -117,7 +117,7 @@ public:
         return InternedString{ it->second };
       }
 
-      uint32_t newId = s_dynamicBase + static_cast<uint32_t>(m_dynamicStorage.size());
+      uint16_t newId = s_dynamicBase + static_cast<uint16_t>(m_dynamicStorage.size());
       m_dynamicStorage.emplace_back(s);       // store in our vector
       m_dynamicMap[s.utf8()] = newId;            // record in our map
       return InternedString{ newId };
@@ -126,7 +126,7 @@ public:
 
   // Retrieves the interned string from an ID
   const String& lookup(InternedString handle) const {
-    uint32_t id = handle.id;
+    uint16_t id = handle.id;
 
     // 1. If it's in numeric range [0..9999]
     if (id <= 9999) {
@@ -142,7 +142,7 @@ public:
     //    offset from s_dynamicBase
     {
       ReadLocker readLocker(m_dynamicMutex);
-      uint32_t offset = id - s_dynamicBase;
+      uint16_t offset = id - s_dynamicBase;
       if (offset < m_dynamicStorage.size()) {
         return m_dynamicStorage[offset];
       }
@@ -156,9 +156,9 @@ private:
 
   // numeric values are 0-9999 - programmatic conversion here
   // fixed (common) keys are 10000-10999 but only a small subset of this is used
-  // the truly dynamic hashtable is 11000-UINT32_MAX
-  static const uint32_t s_fixedBase = 10000;  
-  static const uint32_t s_dynamicBase = 11000; 
+  // the truly dynamic hashtable is 11000-UINT16_MAX
+  static const uint16_t s_fixedBase = 10000;  
+  static const uint16_t s_dynamicBase = 11000; 
   
   void initializeFixedKeymap(std::vector<String> const& commonStrings) {
     // Create a temporary non-const map for initialization
@@ -166,7 +166,7 @@ private:
     auto tempKeys = std::make_unique<std::vector<String>>(commonStrings.size());
         
     // Populate it
-    uint32_t id = s_fixedBase;
+    uint16_t id = s_fixedBase;
     for (auto const& str : commonStrings) {
       (*tempMap)[str] = InternedString{id};
       (*tempKeys)[id-s_fixedBase] = str;
@@ -195,7 +195,7 @@ private:
 
     // prepopulate the cache with a range of known ids we'll
     // be using
-    for (uint32_t i=0; i<1000; i++) {
+    for (uint16_t i=0; i<1000; i++) {
       getNumericString(i);
     }
   }
@@ -221,7 +221,7 @@ private:
   // (To save repeated allocations).
   // NOTE - this is not thread-safe but with pre-population it's very unlikely
   // to cause a problem.
-  const String& getNumericString(uint32_t val) const {
+  const String& getNumericString(uint16_t val) const {
     assert(val <= 9999);
     // Build the cache on first access
     if (numericStringsCache_.empty()) {
@@ -248,7 +248,7 @@ private:
   // For dynamic strings - aka unwashed masses
   mutable ReadersWriterMutex m_dynamicMutex; // guard the dynamic storage with read/write mutex
   std::vector<String> m_dynamicStorage; // index = ID - s_dynamicBase
-  std::unordered_map<std::string, uint32_t> m_dynamicMap;
+  std::unordered_map<std::string, uint16_t> m_dynamicMap;
 
 };
 
