@@ -25,6 +25,7 @@ public:
   void update(float dt);
   void render(WorldRenderData& renderData, function<bool()> lightWaiter);
   void adjustLighting(WorldRenderData& renderData);
+  void optimizeTextures();
 
 private:
   void renderParticles(WorldRenderData& renderData, Particle::Layer layer);
@@ -46,6 +47,11 @@ private:
 
   Json m_highlightConfig;
   Map<EntityHighlightEffectType, pair<Directives, Directives>> m_highlightDirectives;
+
+  uint8_t m_staticFrames=0; 
+  uint64_t m_lastEnvironmentHash = 0;
+  // Compute a hash of environment parameters to detect changes
+  uint64_t computeEnvironmentHash(const WorldRenderData& renderData);
 
   Vec2F m_entityBarOffset;
   Vec2F m_entityBarSpacing;

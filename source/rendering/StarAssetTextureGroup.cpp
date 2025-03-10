@@ -4,13 +4,33 @@
 #include "StarRoot.hpp"
 #include "StarAssets.hpp"
 #include "StarImageMetadataDatabase.hpp"
+#include "StarXXHash.hpp"
+#include <cstddef>
+#include <cstdint>
 
 namespace Star {
+
+bool AssetTextureHashKey::operator==(AssetTextureHashKey const& other) const {
+  return dimensions == other.dimensions && contentHash == other.contentHash;
+}
+
+size_t AssetTextureHashKey::hash() const {
+  return hashOf(dimensions, contentHash);
+}
 
 AssetTextureGroup::AssetTextureGroup(TextureGroupPtr textureGroup)
   : m_textureGroup(std::move(textureGroup)) {
   m_reloadTracker = make_shared<TrackerListener>();
   Root::singleton().registerReloadListener(m_reloadTracker);
+}
+
+AssetTextureHashKey AssetTextureGroup::createAssetTextureHashKey(ImageConstPtr const& image) const {
+  AssetTextureHashKey key;
+  key.dimensions = Vec2U(image->width(), image->height());
+  size_t dataSize = image->width() * image->height() * image->bytesPerPixel();
+  key.contentHash = xxHash3(reinterpret_cast<char const*>(image->data()), dataSize);
+
+  return key;
 }
 
 TexturePtr AssetTextureGroup::loadTexture(AssetPath const& imagePath) {
@@ -25,33 +45,38 @@ bool AssetTextureGroup::textureLoaded(AssetPath const& imagePath) const {
   return m_textureMap.contains(imagePath);
 }
 
-void AssetTextureGroup::cleanup(int64_t textureTimeout) {
+size_t AssetTextureGroup::cleanup(int64_t textureTimeout) {
+  size_t numActions=0;
   if (m_reloadTracker->pullTriggered()) {
+    numActions=m_textureMap.size();
     m_textureMap.clear();
     m_textureDeduplicationMap.clear();
-
   } else {
     int64_t time = Time::monotonicMilliseconds();
 
-    List<Texture const*> liveTextures;
-    filter(m_textureMap, [&](auto const& pair) {
-        if (time - pair.second.second < textureTimeout) {
-          liveTextures.append(pair.second.first.get());
-          return true;
-        }
-        return false;
-      });
-
-    liveTextures.sort();
-
-    eraseWhere(m_textureDeduplicationMap, [&](auto const& p) {
-        return !liveTextures.containsSorted(p.second.get());
-      });
+    // First collect textures that are still in use (not timed out)
+    HashSet<TexturePtr> liveTextures;
+    eraseWhere(m_textureMap, [&](auto const& pair) {
+      if (time - pair.second.second < textureTimeout) {
+        liveTextures.add(pair.second.first);
+        return false;  // Keep this entry
+      }
+      numActions++;
+      return true;  // Remove this entry (timed out)
+    });
+    
+    // Then clean up the deduplication map, removing textures that aren't live
+    eraseWhere(m_textureDeduplicationMap, [&](auto const& pair) {
+      return !liveTextures.contains(pair.second);
+    });
   }
+  return numActions;
 }
 
 TexturePtr AssetTextureGroup::loadTexture(AssetPath const& imagePath, bool tryTexture) {
+  // First check if we've already loaded this asset path
   if (auto p = m_textureMap.ptr(imagePath)) {
+    // Update the timestamp and return the cached texture
     p->second = Time::monotonicMilliseconds();
     return p->first;
   }
@@ -66,20 +91,204 @@ TexturePtr AssetTextureGroup::loadTexture(AssetPath const& imagePath, bool tryTe
 
   if (!image)
     return {};
+    
+  // Create a hash key from the image for deduplication
+  auto hashKey = createAssetTextureHashKey(image);
 
-  // Assets will return the same image ptr if two different asset paths point
-  // to the same underlying cached image.  We should not make duplicate entries
-  // in the texture group for these, so we keep track of the image pointers
-  // returned to deduplicate them.
-  if (auto existingTexture = m_textureDeduplicationMap.value(image)) {
-    m_textureMap.add(imagePath, {existingTexture, Time::monotonicMilliseconds()});
-    return existingTexture;
-  } else {
-    auto texture = m_textureGroup->create(*image);
-    m_textureMap.add(imagePath, {texture, Time::monotonicMilliseconds()});
-    m_textureDeduplicationMap.add(image, texture);
-    return texture;
+  // Check if we already have a texture for this image hash
+  if (auto existingTexture = m_textureDeduplicationMap.value(hashKey)) {
+    // Check if the texture is expired before reusing it
+    if (!existingTexture->isExpired()) {
+      // Texture is still valid, store in the texture map with current timestamp
+      m_textureMap.add(imagePath, {existingTexture, Time::monotonicMilliseconds()});
+      return existingTexture;
+    } else {
+      // Texture is expired, remove it from deduplication map
+      m_textureDeduplicationMap.erase(hashKey);
+      // Fall through to create a new texture
+    }
   }
+  
+  // This is a key method.  In the opengl implementation (currently the only one we have)
+  // this will take the image and blit it into the texture atlas.  After this the actual
+  // ImageConstPtr gets cleaned up so that we no longer have the actual pixels as we
+  // only refer to it by it's TextureHandle.  If, later, in the optimization phase
+  // we need to access the image pixels we have to reload it from the assets system.
+  // This was done to save memory usage.  Before we'd retain all image pixels in all the
+  // groups so that we could optimize the asset packing, but that was wasteful for ram
+  // usage because it stored the image twice, once in the atlas and once standalone.
+  auto texture = m_textureGroup->create(*image);
+
+  // add the texture to both maps
+  m_textureMap.add(imagePath, {texture, Time::monotonicMilliseconds()});
+  m_textureDeduplicationMap.add(hashKey, texture);
+
+  // Do a one-time flush of the asset because it's now stored in the atlas
+  // Note that this doesn't flush parent images if this is a subframe or a directive-applied
+  // image.  For that we'll just have to wait for it to timeout in the asset cache.
+  // That's ok because if we're animating something we might want the parent sprite sheet
+  // to still be cached.
+  assets->remove(Assets::AssetId{Assets::AssetType::Image, imagePath});
+  
+  return texture;
+}
+
+
+void AssetTextureGroup::optimalPackingSort(List<pair<AssetPath, Vec2U>>& textures) {
+  // Hybrid sorting approach for optimal 2D bin packing
+  
+  // Define aspect ratio classes as an enum for clarity
+  enum class AspectClass {
+    Tall,     // taller than wide (portrait)
+    Square,   // roughly square
+    Wide      // wider than tall (landscape)
+  };
+  
+  // First separate textures into groups by aspect ratio class
+  Map<AspectClass, List<pair<AssetPath, Vec2U>>> aspectGroups;
+  
+  for (auto& texture : textures) {
+    const Vec2U& size = texture.second;
+    float aspect = float(size[0]) / float(size[1]);
+    
+    // Classify by aspect ratio
+    AspectClass aspectClass;
+    if (aspect < 0.75)
+      aspectClass = AspectClass::Tall;
+    else if (aspect > 1.33)
+      aspectClass = AspectClass::Wide;
+    else
+      aspectClass = AspectClass::Square;
+    
+    // Add to appropriate group
+    aspectGroups[aspectClass].append(texture);
+  }
+  
+  // Clear original list since we'll rebuild it
+  textures.clear();
+  
+  // Process each aspect ratio group with specialized sorting
+  for (auto& group : aspectGroups) {
+    AspectClass aspectClass = group.first;
+    List<pair<AssetPath, Vec2U>>& groupTextures = group.second;
+    
+    if (aspectClass == AspectClass::Tall) {
+      // Tall textures: sort by height (tallest first), then by width
+      sort(groupTextures, [](const pair<AssetPath, Vec2U>& a, const pair<AssetPath, Vec2U>& b) {
+        const Vec2U& sizeA = a.second;
+        const Vec2U& sizeB = b.second;
+        if (sizeA[1] != sizeB[1])
+          return sizeA[1] > sizeB[1];
+        return sizeA[0] > sizeB[0];
+      });
+      
+      Logger::info("AssetTextureGroup: Sorted {} tall textures", groupTextures.size());
+    }
+    else if (aspectClass == AspectClass::Wide) {
+      // Wide textures: sort by width (widest first), then by height
+      sort(groupTextures, [](const pair<AssetPath, Vec2U>& a, const pair<AssetPath, Vec2U>& b) {
+        const Vec2U& sizeA = a.second;
+        const Vec2U& sizeB = b.second;
+        if (sizeA[0] != sizeB[0])
+          return sizeA[0] > sizeB[0];
+        return sizeA[1] > sizeB[1];
+      });
+      
+      Logger::info("AssetTextureGroup: Sorted {} wide textures", groupTextures.size());
+    }
+    else { // AspectClass::Square
+      // Square-ish textures: sort by max dimension, then by area
+      sort(groupTextures, [](const pair<AssetPath, Vec2U>& a, const pair<AssetPath, Vec2U>& b) {
+        const Vec2U& sizeA = a.second;
+        const Vec2U& sizeB = b.second;
+        int maxA = std::max(sizeA[0], sizeA[1]);
+        int maxB = std::max(sizeB[0], sizeB[1]);
+        if (maxA != maxB)
+          return maxA > maxB;
+        return (sizeA[0] * sizeA[1]) > (sizeB[0] * sizeB[1]);
+      });
+      
+      Logger::info("AssetTextureGroup: Sorted {} square-ish textures", groupTextures.size());
+    }
+    
+    // Add group textures to main list
+    for (auto& texture : groupTextures)
+      textures.append(std::move(texture));
+  }
+  
+  Logger::info("AssetTextureGroup: Sorted {} total textures using hybrid aspect-ratio optimization", textures.size());
+}
+
+void AssetTextureGroup::optimizeAtlasesSafely(RendererPtr renderer, int64_t textureTimeout) {
+
+  size_t numCleaned = cleanup(textureTimeout);  // this will remove any timed-out textures
+  if (numCleaned == 0 && (m_textureMap.empty() || m_textureGroup->isCompressed())) {
+    // Seems optimized already
+    return;
+  }
+
+  Logger::info("AssetTextureGroup: {} active textures after cleanup", m_textureMap.size());
+  
+  // Make sure all pending GPU operations are complete
+  renderer->flush();
+
+  // Next we will destroy all the atlases and rebuild them better than before
+  // The idea here is that we're possibly in a state with some compressed atlases and
+  // other RGB ones with bad box packing, so we dump everything out, sort it
+  // to pack well, and load it all back in.  Once we're done with that we ASTC
+  // compress the atlases.
+  
+  m_textureGroup->reset(); // this removes every atlas and all images in it..
+  if (m_textureMap.empty()) {
+    // short circuit the null case, but if we're here it means we timed this optimization pass poorly
+    Logger::info("Bailing from optimizing an empty texture group.  Look into better sinchronization.");
+    return;
+  }
+  
+  // Get the list of all image assets
+  List<pair<AssetPath, Vec2U>> texturesToPack;
+  texturesToPack.reserve(m_textureMap.size());
+  for (auto const& pair : m_textureMap) {
+    texturesToPack.append({pair.first, pair.second.first->size()});
+  }
+  
+  // From the ashes a new texture map will be reborn
+  m_textureMap.clear();
+  m_textureDeduplicationMap.clear();
+  
+  // Sort this list with fancy algorithms to pack nicely.  Pants and underwear first, then shirts and ties.. etc
+  optimalPackingSort(texturesToPack);
+  
+  // now load it all back in in optimal order
+  Logger::info("AssetTextureGroup: Reloading {} textures in optimal order", texturesToPack.size());
+  int successCount = 0;
+  for (auto const& pack : texturesToPack) {
+    // note that this texture image is just dropped on the floor to be deleted.
+    // if it ends up actually being loaded (and isnt a duplicate or something) then
+    // loadTexture will tell the texture blit it into the atlas so that we don't really need the
+    // asset image anymore
+    auto texture = loadTexture(pack.first);
+    if (texture) {
+      successCount++;
+      if (successCount % 50 == 0)
+        Logger::info("AssetTextureGroup: Loaded {} textures", successCount);
+    } else {
+      Logger::error("AssetTextureGroup: Failed to load texture: {}", pack.first.basePath);
+    }
+  }
+  
+  // Finally compress the atlas image
+  Logger::info("AssetTextureGroup: Compressing optimized atlases");
+  renderer->compressTextureGroupSafely(m_textureGroup);
+  
+  Logger::info("AssetTextureGroup: Atlas optimization complete - {} textures loaded", successCount);
+  Logger::info("AssetTextureGroup: {} textures in deduplication map", m_textureDeduplicationMap.size());
+  Logger::info("AssetTextureGroup: {} textures in textureMap", m_textureMap.size());
+}
+
+void AssetTextureGroup::stats() {
+  Logger::info("AssetTextureGroup: {} textures in deduplication map", m_textureDeduplicationMap.size());
+  Logger::info("AssetTextureGroup: {} textures in textureMap", m_textureMap.size());
 }
 
 }

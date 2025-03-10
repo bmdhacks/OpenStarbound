@@ -248,6 +248,9 @@ public:
   // Bypass asset caching and open an asset file directly.
   IODevicePtr openFile(String const& basePath) const;
 
+  // remove the given path (and perhaps subpaths) from the cache
+  void remove(AssetId const& assetId) const;
+
   // Clear all cached assets that are not queued, persistent, or broken.
   void clearCache();
 

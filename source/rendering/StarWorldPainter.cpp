@@ -4,6 +4,7 @@
 #include "StarConfiguration.hpp"
 #include "StarAssets.hpp"
 #include "StarJsonExtra.hpp"
+#include <cstddef>
 
 namespace Star {
 
@@ -29,7 +30,8 @@ void WorldPainter::renderInit(RendererPtr renderer) {
   m_assets = Root::singleton().assets();
 
   m_renderer = std::move(renderer);
-  auto textureGroup = m_renderer->createTextureGroup(TextureGroupSize::Large);
+  auto textureGroup = m_renderer->createTextureGroup(TextureGroupSize::Small);
+  Logger::info("World painter texture atlas is {}", (void*)&*textureGroup);
   m_textPainter = make_shared<TextPainter>(m_renderer, textureGroup);
   m_tilePainter = make_shared<TilePainter>(m_renderer);
   m_drawablePainter = make_shared<DrawablePainter>(m_renderer, make_shared<AssetTextureGroup>(textureGroup));
@@ -74,6 +76,31 @@ void WorldPainter::render(WorldRenderData& renderData, function<bool()> lightWai
   if (renderData.skyRenderData.type == SkyType::Atmosphereless)
     m_environmentPainter->renderBackOrbiters(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
 
+  // Parallax layers
+  auto parallaxDelta = m_camera.worldGeometry().diff(m_camera.centerWorldPosition(), m_previousCameraCenter);
+  if (parallaxDelta.magnitude() > 10)
+    m_parallaxWorldPosition = m_camera.centerWorldPosition();
+  else
+    m_parallaxWorldPosition += parallaxDelta;
+  m_previousCameraCenter = m_camera.centerWorldPosition();
+  m_parallaxWorldPosition[1] = m_camera.centerWorldPosition()[1];
+
+  if (!renderData.parallaxLayers.empty())
+    m_environmentPainter->renderParallaxLayers(m_parallaxWorldPosition, m_camera, renderData.parallaxLayers, renderData.skyRenderData);
+
+  // uint64_t currentEnvHash = computeEnvironmentHash(renderData);
+  // static const int TRANSITION_SLOP=10;
+  // if (currentEnvHash == m_lastEnvironmentHash) {
+  //   // Reset the tracking since the environment has changed
+  //   m_staticFrames = 0;
+  // } else {
+  //   // Increment a frame counter if the hash remains unchanged
+  //   m_staticFrames++;
+  //   if (m_staticFrames == TRANSITION_SLOP) {
+  //     m_environmentPainter->compressTexturesDirectly();
+  //     m_lastEnvironmentHash=currentEnvHash;
+  //   }
+  // }
   m_renderer->flush();
 
   bool lightMapUpdated = lightWaiter ? lightWaiter() : false;
@@ -94,18 +121,6 @@ void WorldPainter::render(WorldRenderData& renderData, function<bool()> lightWai
     m_renderer->setEffectParameter("lightMapOffset", m_camera.worldToScreen(Vec2F(renderData.lightMinPosition)));
   }
 
-  // Parallax layers
-
-  auto parallaxDelta = m_camera.worldGeometry().diff(m_camera.centerWorldPosition(), m_previousCameraCenter);
-  if (parallaxDelta.magnitude() > 10)
-    m_parallaxWorldPosition = m_camera.centerWorldPosition();
-  else
-    m_parallaxWorldPosition += parallaxDelta;
-  m_previousCameraCenter = m_camera.centerWorldPosition();
-  m_parallaxWorldPosition[1] = m_camera.centerWorldPosition()[1];
-
-  if (!renderData.parallaxLayers.empty())
-    m_environmentPainter->renderParallaxLayers(m_parallaxWorldPosition, m_camera, renderData.parallaxLayers, renderData.skyRenderData);
 
   // Main world layers
 
@@ -166,6 +181,11 @@ void WorldPainter::render(WorldRenderData& renderData, function<bool()> lightWai
 
 void WorldPainter::adjustLighting(WorldRenderData& renderData) {
   m_tilePainter->adjustLighting(renderData);
+}
+
+void WorldPainter::optimizeTextures() {
+  // we only compress environment painter textures because they don't change much
+  m_environmentPainter->compressTexturesDirectly();
 }
 
 void WorldPainter::renderParticles(WorldRenderData& renderData, Particle::Layer layer) {
@@ -321,6 +341,24 @@ void WorldPainter::drawDrawableSet(List<Drawable>& drawables) {
     drawDrawable(std::move(drawable));
 
   m_renderer->flush();
+}
+
+uint64_t WorldPainter::computeEnvironmentHash(const WorldRenderData& renderData) {
+  XXHash64 hasher;
+
+  // Hash key elements that would require texture reloading
+  hasher.push(reinterpret_cast<const char*>(&renderData.skyRenderData.skyParameters.seed), sizeof(renderData.skyRenderData.skyParameters.seed));
+
+  auto backgroundSize = renderData.backgroundOverlays.size();
+  hasher.push(reinterpret_cast<const char*>(&backgroundSize), sizeof(backgroundSize));
+  
+  for (auto layer : renderData.parallaxLayers) {
+    for (auto texture : layer.textures) {
+      hasher.push(texture.utf8Ptr(), strlen(texture.utf8Ptr()));
+    }
+  }
+
+  return hasher.digest();
 }
 
 }

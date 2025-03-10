@@ -568,6 +568,10 @@ IODevicePtr Assets::openFile(String const& path) const {
   return open(path);
 }
 
+void Assets::remove(AssetId const& assetId) const {
+  m_assetsCache.remove(assetId);
+}
+
 void Assets::clearCache() {
   MutexLocker assetsLocker(m_assetsMutex);
 

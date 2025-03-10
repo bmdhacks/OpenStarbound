@@ -156,7 +156,7 @@ public:
   WeatherPool weathers() const;
 
   // Return potential items that would spawn at the given block.
-	void addPotentialBiomeItems(int x, int y, PotentialBiomeItems& items, List<BiomeItemDistribution> const& distributions, BiomePlacementArea area, Maybe<BiomePlacementMode> mode = {}) const;
+  void addPotentialBiomeItems(int x, int y, PotentialBiomeItems& items, List<BiomeItemDistribution> const& distributions, BiomePlacementArea area, Maybe<BiomePlacementMode> mode = {}) const;
   PotentialBiomeItems potentialBiomeItemsAt(int x, int y) const;
 
   // Return only the potential items that can spawn at the given block.

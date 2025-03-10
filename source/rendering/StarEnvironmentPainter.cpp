@@ -28,7 +28,8 @@ Vec3B const EnvironmentPainter::RayColor = Vec3B(255, 255, 200);
 
 EnvironmentPainter::EnvironmentPainter(RendererPtr renderer) {
   m_renderer = std::move(renderer);
-  m_textureGroup = make_shared<AssetTextureGroup>(m_renderer->createTextureGroup(TextureGroupSize::Large));
+  m_textureGroup = make_shared<AssetTextureGroup>(m_renderer->createTextureGroup(TextureGroupSize::MediumLarge));
+  Logger::info("Environment painter texture atlas is {}", (void*)&*m_textureGroup->getTextureGroup());
   m_timer = 0;
   m_rayPerlin = DeterministicFloatF(1, RayPerlinFrequency, RayPerlinAmplitude, 0, 2.0f, 2.0f, Random::randu64());
 }
@@ -339,6 +340,10 @@ void EnvironmentPainter::renderParallaxLayers(
 
 void EnvironmentPainter::cleanup(int64_t textureTimeout) {
   m_textureGroup->cleanup(textureTimeout);
+}
+
+void EnvironmentPainter::compressTexturesDirectly() {
+  m_textureGroup->optimizeAtlasesSafely(m_renderer);
 }
 
 void EnvironmentPainter::drawRays(

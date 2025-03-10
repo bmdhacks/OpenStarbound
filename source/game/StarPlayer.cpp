@@ -769,6 +769,7 @@ Maybe<Json> Player::receiveMessage(ConnectionId fromConnection, String const& me
     if (args.size() > 2)
       deploy = args.get(2).toBool();
 
+    Logger::info("PLAYER GOT A WARP REQUEST");
     setPendingWarp(args.get(0).toString(), animation, deploy);
   } else if (message == "interruptRadioMessage") {
     m_interruptRadioMessage = true;
@@ -2015,6 +2016,7 @@ void Player::teleportOut(String const& animationType, bool deploy) {
 }
 
 void Player::teleportIn() {
+  Logger::info("TELEPORTING IN MOTHERFUCKER");
   m_state = State::TeleportIn;
   m_effectsAnimator->setState("teleport", m_teleportAnimationType + "In");
   m_teleportTimer = m_deployment->isDeployed() ? m_config->deployInTime : m_config->teleportInTime;

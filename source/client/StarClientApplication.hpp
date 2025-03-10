@@ -141,6 +141,8 @@ private:
   Maybe<PendingMultiPlayerConnection> m_pendingMultiPlayerConnection;
   Maybe<HostAddressWithPort> m_currentRemoteJoin;
   int64_t m_timeSinceJoin = 0;
+  bool m_wasInWorld=false;
+  bool m_wasTeleporting=false;
 };
 
 }

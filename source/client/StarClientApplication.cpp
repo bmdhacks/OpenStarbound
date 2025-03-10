@@ -217,6 +217,10 @@ void ClientApplication::applicationInit(ApplicationControllerPtr appController) 
   appController->setVSyncEnabled(vsync);
   appController->setCursorHardware(configuration->get("hardwareCursor").optBool().value(true));
 
+  // Set the rendering resolution first - this is what we'll always render at regardless of window size
+  appController->setRenderingResolution(fullscreen ? fullscreenSize : windowedSize);
+  
+  // Then set the window mode
   if (fullscreen)
     appController->setFullscreenWindow(fullscreenSize);
   else if (borderless)
@@ -402,6 +406,23 @@ void ClientApplication::render() {
       m_worldPainter->render(m_renderData, [&]() -> bool {
         return worldClient->waitForLighting(&m_renderData);
       });
+
+      // optimize just when we start or whenever we teleport somewhere new.  We may attempt to optimize
+      // a few consecutive frames in a row if state is TeleportIn (like if the cinematic isn't finished yet)
+      // so make sure that the optimize function bails out if all textures are compressed
+
+      auto isTeleporting = (m_player->currentState() == Player::State::TeleportIn);
+      if ((!m_wasInWorld && m_player->inWorld() && !isTeleporting) || // in/out of world happens early in teleport too
+          (m_wasTeleporting && !isTeleporting)) { // better to trigger at the end of the teleport when all textures are loaded
+        static int counter=0;
+        Logger::info("Trying to optimize because wasInWorld={} player->inWorld={} wasTeleporting={} currentState={} counter={}",
+                     m_wasInWorld, m_player->inWorld(), m_wasTeleporting, Player::StateNames.getRight(m_player->currentState()), counter);
+        m_worldPainter->optimizeTextures();
+        counter++;
+      }
+      m_wasInWorld=m_player->inWorld();
+      m_wasTeleporting = isTeleporting;
+        
       LogMap::set("client_render_world_painter", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - paintStart));
       LogMap::set("client_render_world_total", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - totalStart));
       

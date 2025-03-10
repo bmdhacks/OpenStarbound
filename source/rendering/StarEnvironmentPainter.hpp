@@ -29,6 +29,9 @@ public:
 
   void cleanup(int64_t textureTimeout);
 
+  // Directly compress textures synchronously without callbacks
+  void compressTexturesDirectly();
+
 private:
   static float const SunriseTime;
   static float const SunsetTime;

@@ -49,6 +49,8 @@ public:
   void startFrame();
   void finishFrame();
 
+  void compressTextureGroupSafely(TextureGroupPtr textureGroup) override;
+
 private:
   struct GlTextureAtlasSet : public TextureAtlasSet<GLuint> {
   public:
@@ -57,6 +59,10 @@ private:
     GLuint createAtlasTexture(Vec2U const& size, PixelFormat pixelFormat) override;
     void destroyAtlasTexture(GLuint const& glTexture) override;
     void copyAtlasPixels(GLuint const& glTexture, Vec2U const& bottomLeft, Image const& image) override;
+    void compressAtlasSet() override;
+    bool isFullyCompressed() override;
+
+    Image getAtlasImageData(GLuint textureId, Vec2U size);
 
     TextureFiltering textureFiltering;
   };
@@ -67,6 +73,9 @@ private:
 
     TextureFiltering filtering() const override;
     TexturePtr create(Image const& texture) override;
+    void compressTextures() override;
+    bool isCompressed() override;
+    void reset() override;
 
     GlTextureAtlasSet textureAtlasSet;
   };
@@ -87,6 +96,8 @@ private:
     GLuint glTextureId() const override;
     Vec2U glTextureSize() const override;
     Vec2U glTextureCoordinateOffset() const override;
+    
+    bool isExpired() const override;
 
     void incrementBufferUseCount();
     void decrementBufferUseCount();
@@ -147,7 +158,7 @@ private:
 
     void set(List<RenderPrimitive>& primitives) override;
 
-    RefPtr<GlTexture> whiteTexture;
+    shared_ptr<GlTexture> whiteTexture;
     ByteArray accumulationBuffer;
 
     HashSet<TexturePtr> usedTextures;
@@ -168,7 +179,7 @@ private:
     TextureAddressing textureAddressing = TextureAddressing::Clamp;
     TextureFiltering textureFiltering = TextureFiltering::Linear;
     GLint textureSizeUniform = -1;
-    RefPtr<GlLoneTexture> textureValue;
+    shared_ptr<GlLoneTexture> textureValue;
   };
   
   class Effect {
@@ -189,7 +200,7 @@ private:
   static void uploadTextureImage(PixelFormat pixelFormat, Vec2U size, uint8_t const* data);
 
   
-  static RefPtr<GlLoneTexture> createGlTexture(ImageView const& image, TextureAddressing addressing, TextureFiltering filtering);
+  static shared_ptr<GlLoneTexture> createGlTexture(ImageView const& image, TextureAddressing addressing, TextureFiltering filtering);
 
   shared_ptr<GlRenderBuffer> createGlRenderBuffer();
 
@@ -215,7 +226,7 @@ private:
   StringMap<Effect> m_effects;
   Effect* m_currentEffect;
 
-  RefPtr<GlTexture> m_whiteTexture;
+  shared_ptr<GlTexture> m_whiteTexture;
 
   Maybe<RectI> m_scissorRect;
 

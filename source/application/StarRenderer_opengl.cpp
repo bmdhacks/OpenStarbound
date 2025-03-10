@@ -1,9 +1,14 @@
 #include "StarRenderer_opengl.hpp"
+#include "StarIODevice.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarCasting.hpp"
 #include "StarLogging.hpp"
+#include "StarRenderer.hpp"
 
+#include <thread>
+#include <mutex>
 #include <SDL2/SDL.h>
+#include "astcenc.h"
 
 namespace Star {
 
@@ -86,11 +91,12 @@ OpenGlRenderer::OpenGlRenderer() {
     throw RendererException("Could not initialize GLAD");
   }
 
-  Logger::info("OpenGL version: '{}' vendor: '{}' renderer: '{}' shader: '{}'",
-      (const char*)glGetString(GL_VERSION),
-      (const char*)glGetString(GL_VENDOR),
-      (const char*)glGetString(GL_RENDERER),
-      (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION));
+  Logger::info("OpenGL version: '{}' vendor: '{}' renderer: '{}' shader: '{}' extensions: '{}'",
+               (const char*)glGetString(GL_VERSION),
+               (const char*)glGetString(GL_VENDOR),
+               (const char*)glGetString(GL_RENDERER),
+               (const char*)glGetString(GL_SHADING_LANGUAGE_VERSION),
+               (const char*)glGetString(GL_EXTENSIONS));
 
   glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
   glEnable(GL_BLEND);
@@ -392,8 +398,12 @@ TextureGroupPtr OpenGlRenderer::createTextureGroup(TextureGroupSize textureSize,
   unsigned atlasNumCells;
   if (textureSize == TextureGroupSize::Large)
     atlasNumCells = 256;
+  else if (textureSize == TextureGroupSize::MediumLarge)
+    atlasNumCells = 192;
   else if (textureSize == TextureGroupSize::Medium)
     atlasNumCells = 128;
+  else if (textureSize == TextureGroupSize::SmallMedium)
+    atlasNumCells = 96;
   else // TextureGroupSize::Small
     atlasNumCells = 64;
 
@@ -443,23 +453,40 @@ void OpenGlRenderer::startFrame() {
     glEnable(GL_SCISSOR_TEST);
 }
 
+void OpenGlRenderer::compressTextureGroupSafely(TextureGroupPtr textureGroup) {
+  // Get the current state
+  GLint currentFBO;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
+  
+  // Make sure all pending operations are complete
+  glFinish();
+  
+  // Clear any existing GL errors before compression
+  while (glGetError() != GL_NO_ERROR) { }
+  
+  // Perform the texture compression
+  auto glTextureGroup = convert<GlTextureGroup>(textureGroup.get());
+  glTextureGroup->textureAtlasSet.compressAtlasSet();
+  
+  // Ensure completion
+  glFinish();
+  
+  // Restore original FBO if needed
+  if (currentFBO != 0) {
+    GLint afterFBO;
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &afterFBO);
+    if (afterFBO != currentFBO)
+      glBindFramebuffer(GL_FRAMEBUFFER, currentFBO);
+  }
+}
+
+
 void OpenGlRenderer::finishFrame() {
   flushImmediatePrimitives();
   // Make sure that the immediate render buffer doesn't needlessly lock texutres
   // from being compressed.
   List<RenderPrimitive> empty;
   m_immediateRenderBuffer->set(empty);
-
-  filter(m_liveTextureGroups, [](auto const& p) {
-        unsigned const CompressionsPerFrame = 1;
-
-        if (!p.unique() || p->textureAtlasSet.totalTextures() > 0) {
-          p->textureAtlasSet.compressionPass(CompressionsPerFrame);
-          return true;
-        }
-
-        return false;
-      });
 
   if (DebugEnabled)
     logGlErrorSummary("OpenGL errors this frame");
@@ -512,8 +539,181 @@ void OpenGlRenderer::GlTextureAtlasSet::copyAtlasPixels(
   glTexSubImage2D(GL_TEXTURE_2D, 0, bottomLeft[0], bottomLeft[1], image.width(), image.height(), format, GL_UNSIGNED_BYTE, image.data());
 }
 
+bool OpenGlRenderer::GlTextureAtlasSet::isFullyCompressed() {
+  bool isCompressed = true;
+  for (auto const& atlas : m_atlases) {
+    if (!atlas->isCompressed) {
+      isCompressed=false;
+    }
+  }
+
+  return isCompressed;
+}
+
+void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
+  Logger::info("GlTextureAtlasSet::compressAtlasSet: Starting atlas compression check");
+
+  bool needsCompression = false;
+  int totalAtlases = 0, compressedAtlases = 0;
+  for (auto const& atlas : m_atlases) {
+    totalAtlases++;
+    if (atlas->isCompressed) {
+      compressedAtlases++;
+    } else {
+      needsCompression = true;
+    }
+  }
+  Logger::info("GlTextureAtlasSet::compressAtlasSet: Found {}/{} atlases already compressed", compressedAtlases, totalAtlases);
+  if (!needsCompression) {
+    Logger::info("GlTextureAtlasSet::compressAtlasSet: No textures need compression, skipping");
+    return;
+  }
+
+  glFinish();
+
+  astcenc_config config;
+  if (astcenc_config_init(ASTCENC_PRF_LDR_SRGB, 8, 8, 1, 20.0f, 0, &config) != ASTCENC_SUCCESS) {
+    Logger::error("GlTextureAtlasSet::compressAtlasSet: Could not init ASTC encoder");
+    return;
+  }
+
+  constexpr int thread_count = 6;
+  astcenc_context* context;
+  Logger::info("GlTextureAtlasSet::compressAtlasSet: Allocating ASTC context with {} threads", thread_count);
+  if (astcenc_context_alloc(&config, thread_count, &context) != ASTCENC_SUCCESS) {
+    Logger::error("GlTextureAtlasSet::compressAtlasSet: Could not allocate ASTC context");
+    return;
+  }
+
+  std::vector<std::thread> workers;
+  
+  for (auto& atlas : m_atlases) {
+    if (atlas->isCompressed) {
+      Logger::info("GlTextureAtlasSet::compressAtlasSet: Skipping already compressed atlas {}",(void*)atlas.get());
+      continue;
+    }
+
+    Logger::info("GlTextureAtlasSet::compressAtlasSet: Starting COMPRESSION for atlas {}", (void*)atlas.get());
+    Vec2U size = atlasTextureSize();
+    glFinish();
+    Image atlasImage = getAtlasImageData(atlas->atlasTexture, size);
+    if (atlasImage.empty()) continue;
+
+    size_t blockCountX = size[0] / 8;
+    size_t blockCountY = size[1] / 8;
+    size_t compressedSize = blockCountX * blockCountY * 16;
+    std::vector<uint8_t> compressedData(compressedSize);
+    
+    void* data_ptrs[1] = { static_cast<void*>(atlasImage.data()) };
+    astcenc_image inputImage{ size[0], size[1], 1, ASTCENC_TYPE_U8, data_ptrs };
+    astcenc_swizzle swizzle = { ASTCENC_SWZ_R, ASTCENC_SWZ_G, ASTCENC_SWZ_B, ASTCENC_SWZ_A };
+    
+    // Use the ASTC encoder's own internal work distribution
+    // Each thread calls compression for the entire image with a unique thread_index
+    auto compressBlock = [&](int thread_id) {
+      if (astcenc_compress_image(context,
+                                 &inputImage,
+                                 &swizzle,
+                                 compressedData.data(),
+                                 compressedSize,
+                                 thread_id) != ASTCENC_SUCCESS)
+        {
+          Logger::error("GlTextureAtlasSet::compressAtlasSet: Error running astcenc_compress_image");
+          return;
+        }
+    };
+    
+    for (int i = 0; i < thread_count; ++i) {
+      workers.emplace_back(compressBlock, i);
+    }
+    
+    for (auto& worker : workers) {
+      worker.join();
+    }
+    workers.clear();
+    astcenc_compress_reset(context);
+
+    glFinish();
+    GLuint newTextureId;
+    glGenTextures(1, &newTextureId);
+    glBindTexture(GL_TEXTURE_2D, newTextureId);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_ASTC_8x8_KHR, size[0], size[1], 0, compressedSize, compressedData.data());
+    atlas->atlasTexture = newTextureId;
+    atlas->isCompressed = true;
+    Logger::info("Successfully compressed texture atlas {}",(void*)atlas.get());
+  }
+
+  astcenc_context_free(context);
+}
+
+Image OpenGlRenderer::GlTextureAtlasSet::getAtlasImageData(GLuint textureId, Vec2U size) {
+  // Save current OpenGL state
+  GLint previousFramebuffer;
+  glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFramebuffer);
+  
+  GLint prevActiveUnit;
+  glGetIntegerv(GL_ACTIVE_TEXTURE, &prevActiveUnit);
+  
+  // Use texture unit 7 consistently for compression operations
+  glActiveTexture(GL_TEXTURE7);
+  
+  GLint prevBoundTexture;
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &prevBoundTexture);
+  
+  // Create an image to hold the data
+  Image atlasImage(size, PixelFormat::RGBA32);
+  
+  // Create a dedicated FBO for this operation
+  GLuint tempFbo;
+  glGenFramebuffers(1, &tempFbo);
+  glBindFramebuffer(GL_FRAMEBUFFER, tempFbo);
+  
+  // Ensure previous operations are complete
+  glFinish();
+  
+  // Bind our texture to unit 7
+  glBindTexture(GL_TEXTURE_2D, textureId);
+    
+  // Attach the texture to the framebuffer
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, textureId, 0);
+
+  glFinish();
+    
+  // Check if the framebuffer is complete
+  GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+  if (status != GL_FRAMEBUFFER_COMPLETE) {
+    Logger::error("Framebuffer wasn't complete ({}), returning god knows what", (int)status);
+    // Clean up and return empty image on failure
+    glBindFramebuffer(GL_FRAMEBUFFER, previousFramebuffer);
+    glBindTexture(GL_TEXTURE_2D, prevBoundTexture);
+    glActiveTexture(prevActiveUnit);
+    glDeleteFramebuffers(1, &tempFbo);
+    return Image();
+  }
+    
+  // Read the pixel data
+  glReadPixels(0, 0, size[0], size[1], GL_RGBA, GL_UNSIGNED_BYTE, atlasImage.data());
+  
+  // Ensure read operation completes
+  glFinish();
+    
+  // Restore previous state
+  glBindFramebuffer(GL_FRAMEBUFFER, previousFramebuffer);
+  glBindTexture(GL_TEXTURE_2D, prevBoundTexture);
+  glActiveTexture(prevActiveUnit);
+  
+  // Clean up
+  glDeleteFramebuffers(1, &tempFbo);
+    
+  return atlasImage;
+}
+
 OpenGlRenderer::GlTextureGroup::GlTextureGroup(unsigned atlasNumCells)
-  : textureAtlasSet(atlasNumCells) {}
+    : textureAtlasSet(atlasNumCells) {
+  Logger::info("Texture group {} has atlas set {}", (void*)this, (void*)&textureAtlasSet);
+}
 
 OpenGlRenderer::GlTextureGroup::~GlTextureGroup() {
   textureAtlasSet.reset();
@@ -530,16 +730,40 @@ TexturePtr OpenGlRenderer::GlTextureGroup::create(Image const& texture) {
   if (texture.empty() || texture.width() + 2 > atlasTextureSize[0] || texture.height() + 2 > atlasTextureSize[1])
     return createGlTexture(texture, TextureAddressing::Clamp, textureAtlasSet.textureFiltering);
 
-  auto glGroupedTexture = make_ref<GlGroupedTexture>();
+  auto glGroupedTexture = make_shared<GlGroupedTexture>();
   glGroupedTexture->parentGroup = shared_from_this();
   glGroupedTexture->parentAtlasTexture = textureAtlasSet.addTexture(texture);
 
   return glGroupedTexture;
 }
 
+bool OpenGlRenderer::GlTextureGroup::isCompressed() {
+  return textureAtlasSet.isFullyCompressed();
+}
+
+void OpenGlRenderer::GlTextureGroup::compressTextures() {
+  Logger::info("GlTextureGroup::compressTextures: START SIMPLE COMPRESSION");
+  
+  // Now attempt compression
+  textureAtlasSet.compressAtlasSet();
+  
+  Logger::info("GlTextureGroup::compressTextures: END SIMPLE COMPRESSION");
+}
+
+void OpenGlRenderer::GlTextureGroup::reset() {
+  // Reset the entire atlas set which will expire all textures
+  textureAtlasSet.reset();
+  glFinish(); // we just deleted a lot of textures so let's wait for it to happen
+  Logger::info("GlTextureGroup::resetAllAtlases: All atlases have been reset");
+}
+
 OpenGlRenderer::GlGroupedTexture::~GlGroupedTexture() {
-  if (parentAtlasTexture)
+  // Only free the texture if it's not expired
+  if (parentAtlasTexture && !parentAtlasTexture->expired()) {
     parentGroup->textureAtlasSet.freeTexture(parentAtlasTexture);
+  } else if (!parentAtlasTexture) {
+    Logger::info("GlGroupedTexture destructor called, no atlas texture");
+  }
 }
 
 Vec2U OpenGlRenderer::GlGroupedTexture::size() const {
@@ -564,6 +788,10 @@ Vec2U OpenGlRenderer::GlGroupedTexture::glTextureSize() const {
 
 Vec2U OpenGlRenderer::GlGroupedTexture::glTextureCoordinateOffset() const {
   return parentAtlasTexture->atlasTextureCoordinates().min();
+}
+
+bool OpenGlRenderer::GlGroupedTexture::isExpired() const {
+  return parentAtlasTexture ? parentAtlasTexture->expired() : false;
 }
 
 void OpenGlRenderer::GlGroupedTexture::incrementBufferUseCount() {
@@ -660,7 +888,6 @@ void OpenGlRenderer::GlRenderBuffer::set(List<RenderPrimitive>& primitives) {
     }
   };
 
-  auto textureCount = useMultiTexturing ? MultiTextureCount : 1;
   auto addCurrentTexture = [&](TexturePtr texture) -> pair<uint8_t, Vec2F> {
     if (!texture)
       texture = whiteTexture;
@@ -796,8 +1023,8 @@ void OpenGlRenderer::flushImmediatePrimitives() {
 }
 
 auto OpenGlRenderer::createGlTexture(ImageView const& image, TextureAddressing addressing, TextureFiltering filtering)
-    ->RefPtr<GlLoneTexture> {
-  auto glLoneTexture = make_ref<GlLoneTexture>();
+    ->shared_ptr<GlLoneTexture> {
+  auto glLoneTexture = make_shared<GlLoneTexture>();
   glLoneTexture->textureFiltering = filtering;
   glLoneTexture->textureAddressing = addressing;
   glLoneTexture->textureSize = image.size;

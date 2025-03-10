@@ -6,13 +6,14 @@
 #include "StarJson.hpp"
 #include "StarBiMap.hpp"
 #include "StarRefPtr.hpp"
+#include <functional>
 
 namespace Star {
 
 STAR_EXCEPTION(RendererException, StarException);
 
 class Texture;
-typedef RefPtr<Texture> TexturePtr;
+typedef shared_ptr<Texture> TexturePtr;
 
 STAR_CLASS(TextureGroup);
 STAR_CLASS(RenderBuffer);
@@ -36,7 +37,9 @@ extern EnumMap<TextureFiltering> const TextureFilteringNames;
 // Where Large sized textures are not supported, a Medium one is used
 enum class TextureGroupSize {
   Small,
+  SmallMedium,
   Medium,
+  MediumLarge,
   Large
 };
 
@@ -96,6 +99,9 @@ public:
   virtual Vec2U size() const = 0;
   virtual TextureFiltering filtering() const = 0;
   virtual TextureAddressing addressing() const = 0;
+  
+  // Returns true if this texture has been expired (e.g., its atlas was destroyed)
+  virtual bool isExpired() const { return false; }
 };
 
 // Textures may be created individually, or in a texture group.  Textures in
@@ -109,6 +115,12 @@ public:
 
   virtual TextureFiltering filtering() const = 0;
   virtual TexturePtr create(Image const& texture) = 0;
+  virtual void compressTextures() = 0;
+  virtual bool isCompressed() = 0;
+
+  // deletes everything. Useful if an AssetTexturegroup wants to reorganize
+  // because it holds a list of textures also
+  virtual void reset() = 0;
 };
 
 class RenderBuffer {
@@ -162,6 +174,9 @@ public:
   virtual void renderBuffer(RenderBufferPtr const& renderBuffer, Mat3F const& transformation = Mat3F::identity()) = 0;
 
   virtual void flush(Mat3F const& transformation = Mat3F::identity()) = 0;
+
+  // this will likely be done inside above callback
+  virtual void compressTextureGroupSafely(TextureGroupPtr textureGroup) = 0;
 };
 
 }

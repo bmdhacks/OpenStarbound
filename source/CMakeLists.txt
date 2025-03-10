@@ -477,6 +477,7 @@ find_package(Opus CONFIG REQUIRED)
 find_package(OggVorbis REQUIRED)
 find_package(zstd CONFIG REQUIRED)
 
+
 include_directories(SYSTEM
     ${FREETYPE_INCLUDE_DIRS}
     ${OGGVORBIS_INCLUDE_DIR}
@@ -494,21 +495,12 @@ set(STAR_EXT_LIBS ${STAR_EXT_LIBS}
 )
 
 if(STAR_BUILD_GUI)
-#  find_package(SDL2 CONFIG REQUIRED)
+  find_package(ASTCEnc REQUIRED)
 
-#  set(STAR_EXT_GUI_LIBS
-#    $<TARGET_NAME_IF_EXISTS:SDL2::SDL2main>
-#    $<IF:$<TARGET_EXISTS:SDL2::SDL2>,SDL2::SDL2,SDL2::SDL2-static>
-#  )
-
-#  find_package(OpenGL REQUIRED)
-#  find_package(GLEW REQUIRED)
-
-#  include_directories(SYSTEM ${GLEW_INCLUDE_DIR})
   set(STAR_EXT_GUI_LIBS ${STAR_EXT_GUI_LIBS}
       ${OPENGL_LIBRARY}
 	  SDL2
-#      GLEW::glew_s
+      ${ASTCENC_LIBRARY}
   )
 
   if(STAR_SYSTEM_MACOS)
