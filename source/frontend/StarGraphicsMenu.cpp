@@ -73,41 +73,12 @@ GraphicsMenu::GraphicsMenu(PaneManager* manager,UniverseClientPtr client)
         m_localChanges.set("fullscreen", !checked);
       syncGui();
     });
-  reader.registerCallback("textureLimitCheckbox", [=](Widget*) {
-      m_localChanges.set("limitTextureAtlasSize", fetchChild<ButtonWidget>("textureLimitCheckbox")->isChecked());
-      syncGui();
-    });
-  reader.registerCallback("multiTextureCheckbox", [=](Widget*) {
-      m_localChanges.set("useMultiTexturing", fetchChild<ButtonWidget>("multiTextureCheckbox")->isChecked());
-      syncGui();
-    });
-  reader.registerCallback("antiAliasingCheckbox", [=](Widget*) {
-    bool checked = fetchChild<ButtonWidget>("antiAliasingCheckbox")->isChecked();
-    m_localChanges.set("antiAliasing", checked);
-    Root::singleton().configuration()->set("antiAliasing", checked);
-    syncGui();
-  });
   reader.registerCallback("hardwareCursorCheckbox", [=](Widget*) {
     bool checked = fetchChild<ButtonWidget>("hardwareCursorCheckbox")->isChecked();
     m_localChanges.set("hardwareCursor", checked);
     Root::singleton().configuration()->set("hardwareCursor", checked);
     GuiContext::singleton().applicationController()->setCursorHardware(checked);
   });
-  reader.registerCallback("monochromeCheckbox", [=](Widget*) {
-      bool checked = fetchChild<ButtonWidget>("monochromeCheckbox")->isChecked();
-      m_localChanges.set("monochromeLighting", checked);
-      Root::singleton().configuration()->set("monochromeLighting", checked);
-      syncGui();
-    });
-  reader.registerCallback("newLightingCheckbox", [=](Widget*) {
-    bool checked = fetchChild<ButtonWidget>("newLightingCheckbox")->isChecked();
-    m_localChanges.set("newLighting", checked);
-    Root::singleton().configuration()->set("newLighting", checked);
-    syncGui();
-  });
-  reader.registerCallback("showShadersMenu", [=](Widget*) {
-      displayShaders();
-    });
 
   auto assets = Root::singleton().assets();
 
@@ -165,12 +136,7 @@ StringList const GraphicsMenu::ConfigKeys = {
   "interactiveHighlight",
   "fullscreen",
   "borderless",
-  "limitTextureAtlasSize",
-  "useMultiTexturing",
-  "antiAliasing",
   "hardwareCursor",
-  "monochromeLighting",
-  "newLighting"
 };
 
 void GraphicsMenu::initConfig() {
@@ -233,11 +199,6 @@ void GraphicsMenu::syncGui() {
   fetchChild<ButtonWidget>("interactiveHighlightCheckbox")->setChecked(m_localChanges.get("interactiveHighlight").toBool());
   fetchChild<ButtonWidget>("fullscreenCheckbox")->setChecked(m_localChanges.get("fullscreen").toBool());
   fetchChild<ButtonWidget>("borderlessCheckbox")->setChecked(m_localChanges.get("borderless").toBool());
-  fetchChild<ButtonWidget>("textureLimitCheckbox")->setChecked(m_localChanges.get("limitTextureAtlasSize").toBool());
-  fetchChild<ButtonWidget>("multiTextureCheckbox")->setChecked(m_localChanges.get("useMultiTexturing").optBool().value(true));
-  fetchChild<ButtonWidget>("antiAliasingCheckbox")->setChecked(m_localChanges.get("antiAliasing").toBool());
-  fetchChild<ButtonWidget>("monochromeCheckbox")->setChecked(m_localChanges.get("monochromeLighting").toBool());
-  fetchChild<ButtonWidget>("newLightingCheckbox")->setChecked(m_localChanges.get("newLighting").optBool().value(true));
   fetchChild<ButtonWidget>("hardwareCursorCheckbox")->setChecked(m_localChanges.get("hardwareCursor").toBool());
 }
 
@@ -255,6 +216,18 @@ void GraphicsMenu::displayShaders() {
 void GraphicsMenu::applyWindowSettings() {
   auto configuration = Root::singleton().configuration();
   auto appController = GuiContext::singleton().applicationController();
+  
+  // Get the new rendering resolution based on fullscreen setting
+  Vec2U renderingResolution;
+  if (configuration->get("fullscreen").toBool())
+    renderingResolution = jsonToVec2U(configuration->get("fullscreenResolution"));
+  else
+    renderingResolution = jsonToVec2U(configuration->get("windowedResolution"));
+  
+  // First set the rendering resolution - this is what we'll always render at
+  appController->setRenderingResolution(renderingResolution);
+  
+  // Then set the window mode
   if (configuration->get("fullscreen").toBool())
     appController->setFullscreenWindow(jsonToVec2U(configuration->get("fullscreenResolution")));
   else if (configuration->get("borderless").toBool())

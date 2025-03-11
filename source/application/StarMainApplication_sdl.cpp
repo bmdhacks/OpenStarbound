@@ -6,10 +6,12 @@
 #include "StarTtlCache.hpp"
 #include "StarImage.hpp"
 #include "StarImageProcessing.hpp"
+#include "StarMathCommon.hpp"
 
 #include "SDL2/SDL.h"
 #include "StarPlatformServices_pc.hpp"
 #include <SDL2/SDL_video.h>
+#include "glad/glad.h"
 
 #ifdef STAR_SYSTEM_WINDOWS
 #include "SDL2/SDL_syswm.h"
@@ -220,6 +222,7 @@ ControllerButton controllerButtonFromSdlControllerButton(uint8_t button) {
 
 class SdlPlatform {
 public:
+
   SdlPlatform(ApplicationUPtr application, StringList cmdLineArgs) {
     m_application = std::move(application);
 
@@ -362,7 +365,18 @@ public:
     }
 
     m_renderer = make_shared<OpenGlRenderer>();
-    m_renderer->setScreenSize(m_windowSize);
+
+    // Always use low-res rendering with virtual resolution matching window size initially
+    m_virtualResolution = m_windowSize;
+    
+    // Initialize display area with default values to prevent division by zero
+  m_displayArea = RectI(Vec2I(0, 0), Vec2I(m_windowSize[0], m_windowSize[1]));
+
+  // Setup low-res rendering by default
+    setupLowResRendering();
+
+    // Set renderer to use virtual resolution
+    m_renderer->setScreenSize(m_virtualResolution);
 
     m_cursorCache.setTimeToLive(30000);
   }
@@ -374,6 +388,7 @@ public:
 
     closeAudioInputDevice();
 
+    cleanupLowResRendering();
     m_renderer.reset();
 
     Logger::info("Application: Destroying SDL Window");
@@ -441,7 +456,36 @@ public:
       while (true) {
         cleanup();
 
-        for (auto const& event : processEvents())
+        // Process events
+        List<InputEvent> events = processEvents();
+        
+        // Always apply coordinate transformations since we're always using low-res rendering
+        for (auto& event : events) {
+          if (auto mouseMove = event.ptr<MouseMoveEvent>()) {
+            event = MouseMoveEvent{
+              mouseMove->mouseMove,
+              actualToVirtualCoords(mouseMove->mousePosition)
+            };
+          } else if (auto buttonDown = event.ptr<MouseButtonDownEvent>()) {
+            event = MouseButtonDownEvent{
+              buttonDown->mouseButton,
+              actualToVirtualCoords(buttonDown->mousePosition)
+            };
+          } else if (auto buttonUp = event.ptr<MouseButtonUpEvent>()) {
+            event = MouseButtonUpEvent{
+              buttonUp->mouseButton,
+              actualToVirtualCoords(buttonUp->mousePosition)
+            };
+          } else if (auto wheel = event.ptr<MouseWheelEvent>()) {
+            event = MouseWheelEvent{
+              wheel->mouseWheel,
+              actualToVirtualCoords(wheel->mousePosition)
+            };
+          }
+        }
+        
+        // Process the events
+        for (auto const& event : events)
           m_application->processInput(event);
 
         if (m_platformServices)
@@ -459,9 +503,17 @@ public:
           m_updateRate = m_updateTicker.tick();
         }
 
+        // Always use low-res rendering
+        beginLowResRender();
+
         m_renderer->startFrame();
         m_application->render();
         m_renderer->finishFrame();
+
+
+        // Always end low-res rendering and scale up to window size
+        endLowResRender();
+        
         SDL_GL_SwapWindow(m_sdlWindow);
         m_renderRate = m_renderTicker.tick();
 
@@ -548,6 +600,18 @@ private:
         SDL_SetWindowTitle(parent->m_sdlWindow, parent->m_windowTitle.utf8Ptr());
     }
 
+
+
+
+    void setRenderingResolution(Vec2U resolution) override {
+      parent->m_virtualResolution = resolution;
+      // If low-res rendering is already set up, clean it up and recreate
+      if (parent->m_framebuffer)
+        parent->cleanupLowResRendering();
+      parent->setupLowResRendering();
+      parent->m_renderer->setScreenSize(parent->m_virtualResolution);
+    }
+
     void setFullscreenWindow(Vec2U fullScreenResolution) override {
       if (parent->m_windowMode != WindowMode::Fullscreen || parent->m_windowSize != fullScreenResolution) {
         SDL_DisplayMode requestedDisplayMode = {SDL_PIXELFORMAT_RGB888, (int)fullScreenResolution[0], (int)fullScreenResolution[1], 0, 0};
@@ -575,9 +639,24 @@ private:
         SDL_DisplayMode actualDisplayMode;
         if (SDL_GetWindowDisplayMode(parent->m_sdlWindow, &actualDisplayMode) == 0) {
           parent->m_windowSize = {(unsigned)actualDisplayMode.w, (unsigned)actualDisplayMode.h};
+          
+          // Keep using the requested virtual resolution for rendering
+          // (this won't change unless explicitly changed through setRenderingResolution)
+          
+          // Clean up and recreate low-res rendering setup to match new window size
+          if (parent->m_framebuffer)
+            parent->cleanupLowResRendering();
+          
+          parent->setupLowResRendering();
+          
+          Logger::info("Fullscreen mode: Rendering at {}x{}, displaying at {}x{}", 
+              parent->m_virtualResolution[0], parent->m_virtualResolution[1], 
+              parent->m_windowSize[0], parent->m_windowSize[1]);
+          
+          // Keep renderer using the virtual resolution
+          parent->m_renderer->setScreenSize(parent->m_virtualResolution);
 
           // call these manually since no SDL_WindowEvent is triggered when changing between fullscreen resolutions for some reason
-          parent->m_renderer->setScreenSize(parent->m_windowSize);
           parent->m_application->windowChanged(parent->m_windowMode, parent->m_windowSize);
         } else {
           Logger::error("Couldn't get window display mode!");
@@ -600,7 +679,27 @@ private:
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
 
         parent->m_windowMode = WindowMode::Normal;
-        parent->m_windowSize = windowSize;
+        
+        // Get actual window size which might be different from requested
+        int actualWidth, actualHeight;
+        SDL_GetWindowSize(window, &actualWidth, &actualHeight);
+        parent->m_windowSize = {(unsigned)actualWidth, (unsigned)actualHeight};
+        
+        // Keep the current virtual resolution (don't change unless explicitly requested)
+        // This is now handled by setRenderingResolution
+        
+        // Clean up and recreate low-res rendering setup to match new window size
+        if (parent->m_framebuffer)
+          parent->cleanupLowResRendering();
+        
+        parent->setupLowResRendering();
+        
+        Logger::info("Window mode: Rendering at {}x{}, displaying at {}x{}", 
+            parent->m_virtualResolution[0], parent->m_virtualResolution[1], 
+            parent->m_windowSize[0], parent->m_windowSize[1]);
+        
+        // Keep renderer using the virtual resolution
+        parent->m_renderer->setScreenSize(parent->m_virtualResolution);
       }
     }
 
@@ -657,6 +756,8 @@ private:
     }
 
     void setCursorPosition(Vec2I cursorPosition) override {
+      // Always transform cursor coordinates to window space
+      cursorPosition = parent->virtualToActualCoords(cursorPosition);
       SDL_WarpMouseInWindow(parent->m_sdlWindow, cursorPosition[0], cursorPosition[1]);
     }
 
@@ -761,7 +862,21 @@ private:
 
         } else if (event.window.event == SDL_WINDOWEVENT_RESIZED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
           m_windowSize = Vec2U(event.window.data1, event.window.data2);
-          m_renderer->setScreenSize(m_windowSize);
+          
+          // Don't change the virtual resolution, just rebuild the low-res rendering pipeline
+          // and recalculate display area
+          if (m_framebuffer) {
+            cleanupLowResRendering();
+            setupLowResRendering();
+          } else {
+            // If setupLowResRendering hasn't been called yet, at least initialize the display area
+            // to prevent division by zero in coordinate transformations
+            m_displayArea = RectI(Vec2I(0, 0), Vec2I(m_windowSize[0], m_windowSize[1]));
+          }
+          
+          // Keep rendering size at virtual resolution
+          m_renderer->setScreenSize(m_virtualResolution);
+          
           m_application->windowChanged(m_windowMode, m_windowSize);
         }
         break;
@@ -969,10 +1084,361 @@ private:
   bool m_audioEnabled = false;
   bool m_quitRequested = false;
 
+  // Rendering support
+  GLuint m_framebuffer = 0;
+  GLuint m_offscreenTexture = 0;
+  Vec2U m_virtualResolution = Vec2U(854, 480);
+  RectI m_displayArea; // Stores the letterboxed/pillarboxed display area
+  
+  // Shader-based rendering resources
+  GLuint m_upscaleProgram = 0;
+  GLuint m_vertexShader = 0;
+  GLuint m_fragmentShader = 0;
+  GLuint m_quadVBO = 0;
+  GLint m_positionAttrib = -1;
+  GLint m_texCoordAttrib = -1;
+  GLint m_textureSampler = -1;
+  
+  // Helper methods for shader compilation
+  GLuint compileShader(GLenum type, const char* source);
+  GLuint createProgram(GLuint vertShader, GLuint fragShader);
+  
+  void setupLowResRendering();
+  void cleanupLowResRendering();
+  void beginLowResRender();
+  void endLowResRender();
+  Vec2I virtualToActualCoords(Vec2I virtualCoords);
+  Vec2I actualToVirtualCoords(Vec2I actualCoords);
+
   OpenGlRendererPtr m_renderer;
   ApplicationUPtr m_application;
   PcPlatformServicesUPtr m_platformServices;
 };
+
+GLuint SdlPlatform::compileShader(GLenum type, const char* source) {
+  GLuint shader = glCreateShader(type);
+  if (shader == 0) {
+    Logger::error("Failed to create shader of type {}", type);
+    return 0;
+  }
+
+  glShaderSource(shader, 1, &source, NULL);
+  glCompileShader(shader);
+
+  GLint compileStatus;
+  glGetShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
+  if (compileStatus == GL_FALSE) {
+    GLint infoLogLength;
+    glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &infoLogLength);
+    
+    if (infoLogLength > 0) {
+      std::vector<char> infoLog(infoLogLength);
+      glGetShaderInfoLog(shader, infoLogLength, NULL, infoLog.data());
+      Logger::error("Shader compilation error: {}", infoLog.data());
+    }
+    
+    glDeleteShader(shader);
+    return 0;
+  }
+  
+  return shader;
+}
+
+GLuint SdlPlatform::createProgram(GLuint vertShader, GLuint fragShader) {
+  GLuint program = glCreateProgram();
+  if (program == 0) {
+    Logger::error("Failed to create shader program");
+    return 0;
+  }
+  
+  glAttachShader(program, vertShader);
+  glAttachShader(program, fragShader);
+  glLinkProgram(program);
+  
+  GLint linkStatus;
+  glGetProgramiv(program, GL_LINK_STATUS, &linkStatus);
+  if (linkStatus == GL_FALSE) {
+    GLint infoLogLength;
+    glGetProgramiv(program, GL_INFO_LOG_LENGTH, &infoLogLength);
+    
+    if (infoLogLength > 0) {
+      std::vector<char> infoLog(infoLogLength);
+      glGetProgramInfoLog(program, infoLogLength, NULL, infoLog.data());
+      Logger::error("Program linking error: {}", infoLog.data());
+    }
+    
+    glDeleteProgram(program);
+    return 0;
+  }
+  
+  return program;
+}
+
+void SdlPlatform::setupLowResRendering() {
+  // Create a framebuffer object for rendering at a lower resolution
+  glGenFramebuffers(1, &m_framebuffer);
+  glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+  
+  // Create a texture to render to
+  glGenTextures(1, &m_offscreenTexture);
+  glBindTexture(GL_TEXTURE_2D, m_offscreenTexture);
+  
+  // Set texture parameters - use linear filtering for smooth upscaling
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  
+  // Create the texture with the desired lower resolution
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_virtualResolution[0], m_virtualResolution[1], 
+               0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  
+  // Attach the texture to the framebuffer
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, m_offscreenTexture, 0);
+  
+  // Check framebuffer status
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    Logger::error("Failed to create complete framebuffer for low-resolution rendering!");
+    cleanupLowResRendering();
+      return;
+  }
+  
+  // Create and compile shaders for upscaling
+  const char* vertexShaderSource = 
+      "attribute vec2 a_position;\n"
+      "attribute vec2 a_texCoord;\n"
+      "varying vec2 v_texCoord;\n"
+      "void main() {\n"
+      "  gl_Position = vec4(a_position, 0.0, 1.0);\n"
+      "  v_texCoord = a_texCoord;\n"
+      "}\n";
+      
+  const char* fragmentShaderSource = 
+      "precision mediump float;\n"
+      "varying vec2 v_texCoord;\n"
+      "uniform sampler2D u_texture;\n"
+      "void main() {\n"
+      "  gl_FragColor = texture2D(u_texture, v_texCoord);\n"
+      "}\n";
+      
+  m_vertexShader = compileShader(GL_VERTEX_SHADER, vertexShaderSource);
+  m_fragmentShader = compileShader(GL_FRAGMENT_SHADER, fragmentShaderSource);
+  
+  if (!m_vertexShader || !m_fragmentShader) {
+    Logger::error("Failed to compile shaders for low-resolution rendering!");
+    cleanupLowResRendering();
+    return;
+  }
+  
+  m_upscaleProgram = createProgram(m_vertexShader, m_fragmentShader);
+  if (!m_upscaleProgram) {
+    Logger::error("Failed to create shader program for low-resolution rendering!");
+    cleanupLowResRendering();
+    return;
+  }
+  
+  // Get attribute locations
+  m_positionAttrib = glGetAttribLocation(m_upscaleProgram, "a_position");
+  m_texCoordAttrib = glGetAttribLocation(m_upscaleProgram, "a_texCoord");
+  m_textureSampler = glGetUniformLocation(m_upscaleProgram, "u_texture");
+  
+  // Create vertex buffer for fullscreen quad
+  glGenBuffers(1, &m_quadVBO);
+  glBindBuffer(GL_ARRAY_BUFFER, m_quadVBO);
+  
+  // Interleaved vertex data: position (x,y) followed by texCoord (s,t)
+  const GLfloat quadVertices[] = {
+      // Position (x,y), TexCoord (s,t)
+      -1.0f, -1.0f, 0.0f, 0.0f,  // Bottom-left
+       1.0f, -1.0f, 1.0f, 0.0f,  // Bottom-right
+      -1.0f,  1.0f, 0.0f, 1.0f,  // Top-left
+       1.0f,  1.0f, 1.0f, 1.0f   // Top-right
+  };
+  
+  glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), quadVertices, GL_STATIC_DRAW);
+  
+  // Return to the default framebuffer
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  
+  Logger::info("Low-resolution rendering setup complete: {}x{}", m_virtualResolution[0], m_virtualResolution[1]);
+}
+
+void SdlPlatform::cleanupLowResRendering() {
+  if (m_quadVBO) {
+    glDeleteBuffers(1, &m_quadVBO);
+    m_quadVBO = 0;
+  }
+  
+  if (m_vertexShader) {
+    glDeleteShader(m_vertexShader);
+    m_vertexShader = 0;
+  }
+  
+  if (m_fragmentShader) {
+    glDeleteShader(m_fragmentShader);
+    m_fragmentShader = 0;
+  }
+  
+  if (m_upscaleProgram) {
+    glDeleteProgram(m_upscaleProgram);
+    m_upscaleProgram = 0;
+  }
+  
+  if (m_offscreenTexture) {
+    glDeleteTextures(1, &m_offscreenTexture);
+    m_offscreenTexture = 0;
+  }
+  
+  if (m_framebuffer) {
+    glDeleteFramebuffers(1, &m_framebuffer);
+    m_framebuffer = 0;
+  }
+}
+
+void SdlPlatform::beginLowResRender() {
+  // Safety checks
+  if (!m_framebuffer || m_virtualResolution[0] <= 0 || m_virtualResolution[1] <= 0)
+    return;
+    
+  // Switch to our framebuffer for rendering at low resolution
+  glBindFramebuffer(GL_FRAMEBUFFER, m_framebuffer);
+  
+  // Set viewport to virtual resolution
+  glViewport(0, 0, m_virtualResolution[0], m_virtualResolution[1]);
+  
+  // Tell the renderer we're at the lower resolution for game logic/UI calculations
+  m_renderer->setScreenSize(m_virtualResolution);
+}
+
+void SdlPlatform::endLowResRender() {
+  // Safety checks
+  if (!m_framebuffer || !m_upscaleProgram || 
+      m_windowSize[0] <= 0 || m_windowSize[1] <= 0 ||
+      m_virtualResolution[0] <= 0 || m_virtualResolution[1] <= 0)
+    return;
+    
+  // Return to the default framebuffer for upscaling
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+  
+  // Set viewport to actual window size
+  glViewport(0, 0, m_windowSize[0], m_windowSize[1]);
+  
+  // Clear the main framebuffer to black (for letterboxing/pillarboxing)
+  glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  
+  // Calculate display area maintaining aspect ratio
+  float targetAspect = (float)m_virtualResolution[0] / m_virtualResolution[1];
+  float windowAspect = (float)m_windowSize[0] / max(1.0f, (float)m_windowSize[1]); // Prevent division by zero
+  
+  int displayWidth, displayHeight;
+  int offsetX = 0, offsetY = 0;
+  
+  if (windowAspect > targetAspect) {
+    // Window is wider than content - use pillarboxing (vertical bars)
+    displayHeight = m_windowSize[1];
+    displayWidth = (int)(displayHeight * targetAspect);
+    offsetX = (m_windowSize[0] - displayWidth) / 2;
+  } else {
+    // Window is taller than content - use letterboxing (horizontal bars)
+    displayWidth = m_windowSize[0];
+    displayHeight = (int)(displayWidth / targetAspect);
+    offsetY = (m_windowSize[1] - displayHeight) / 2;
+  }
+  
+  // Store display area for coordinate transformations
+  m_displayArea = RectI(Vec2I(offsetX, offsetY), Vec2I(offsetX + displayWidth, offsetY + displayHeight));
+  
+  // Set viewport to the letterboxed/pillarboxed area
+  glViewport(offsetX, offsetY, displayWidth, displayHeight);
+  
+  // Draw the offscreen texture to the display area
+  glDisable(GL_BLEND);
+  
+  // Use our upscale shader program
+  glUseProgram(m_upscaleProgram);
+  
+  // Bind our texture and set the uniform
+  glActiveTexture(GL_TEXTURE0);
+  glBindTexture(GL_TEXTURE_2D, m_offscreenTexture);
+  glUniform1i(m_textureSampler, 0);
+  
+  // Bind the vertex buffer
+  glBindBuffer(GL_ARRAY_BUFFER, m_quadVBO);
+  
+  // Enable vertex attributes
+  glEnableVertexAttribArray(m_positionAttrib);
+  glEnableVertexAttribArray(m_texCoordAttrib);
+  
+  // Set up attribute pointers (interleaved: position, texCoord)
+  const int stride = 4 * sizeof(GLfloat);
+  glVertexAttribPointer(m_positionAttrib, 2, GL_FLOAT, GL_FALSE, stride, 0);
+  glVertexAttribPointer(m_texCoordAttrib, 2, GL_FLOAT, GL_FALSE, stride, 
+                      (void*)(2 * sizeof(GLfloat)));
+  
+  // Draw the quad
+  glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+  
+  // Clean up
+  glDisableVertexAttribArray(m_positionAttrib);
+  glDisableVertexAttribArray(m_texCoordAttrib);
+  glBindBuffer(GL_ARRAY_BUFFER, 0);
+  glUseProgram(0);
+  
+  // Reset viewport to full window
+  glViewport(0, 0, m_windowSize[0], m_windowSize[1]);
+  
+  glEnable(GL_BLEND);
+}
+
+Vec2I SdlPlatform::virtualToActualCoords(Vec2I virtualCoords) {
+  // Always convert coordinates since we're always using low-res rendering
+  // Check for valid display area to prevent division by zero
+  if (m_displayArea.width() <= 0 || m_displayArea.height() <= 0 || 
+      m_virtualResolution[0] <= 0 || m_virtualResolution[1] <= 0)
+    return virtualCoords;
+    
+  // Convert from virtual coordinates to actual window coordinates
+  // accounting for letterboxing/pillarboxing
+  return Vec2I(
+      m_displayArea.min()[0] + (virtualCoords[0] * m_displayArea.width()) / m_virtualResolution[0],
+      m_displayArea.min()[1] + (virtualCoords[1] * m_displayArea.height()) / m_virtualResolution[1]
+  );
+}
+
+Vec2I SdlPlatform::actualToVirtualCoords(Vec2I actualCoords) {
+  // Always convert coordinates since we're always using low-res rendering
+  
+  // Check for valid display area to prevent division by zero
+  if (m_displayArea.width() <= 0 || m_displayArea.height() <= 0)
+    return actualCoords;
+
+  // First check if the actual coords are within the display area
+  if (!m_displayArea.contains(actualCoords)) {
+    // If outside display area, map to nearest edge of virtual coordinates
+    int virtualX = m_virtualResolution[0] / 2; // Default to center if can't compute
+    int virtualY = m_virtualResolution[1] / 2;
+    
+    if (m_displayArea.width() > 0)
+      virtualX = clamp<int>(
+          ((actualCoords[0] - m_displayArea.min()[0]) * m_virtualResolution[0]) / m_displayArea.width(),
+          0, m_virtualResolution[0] - 1);
+          
+    if (m_displayArea.height() > 0)
+      virtualY = clamp<int>(
+          ((actualCoords[1] - m_displayArea.min()[1]) * m_virtualResolution[1]) / m_displayArea.height(),
+          0, m_virtualResolution[1] - 1);
+          
+    return Vec2I(virtualX, virtualY);
+  }
+  
+  // Convert from actual window coordinates to virtual coordinates
+  return Vec2I(
+      ((actualCoords[0] - m_displayArea.min()[0]) * m_virtualResolution[0]) / m_displayArea.width(),
+      ((actualCoords[1] - m_displayArea.min()[1]) * m_virtualResolution[1]) / m_displayArea.height()
+  );
+}
 
 int runMainApplication(ApplicationUPtr application, StringList cmdLineArgs) {
   try {

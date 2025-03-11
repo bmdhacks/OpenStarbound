@@ -43,6 +43,7 @@ public:
   virtual void setCursorPosition(Vec2I cursorPosition) = 0;
   virtual void setCursorHardware(bool cursorHardware) = 0;
   virtual bool setCursorImage(const String& id, const ImageConstPtr& image, unsigned scale, const Vec2I& offset) = 0;
+  virtual void setRenderingResolution(Vec2U resolution) = 0;
   virtual void setAcceptingTextInput(bool acceptingTextInput) = 0;
 
 

@@ -40,17 +40,17 @@ function patch(config)
   config.interfaceScaleList = {0, 1, 2, 3, 4, 5, 6} -- 0 = AUTO!
 
   -- Create anti-aliasing toggle
-  shift(clone(layout, "multiTextureLabel", "antiAliasingLabel"), 98).value = "SUPER-SAMPLED AA"
-  shift(clone(layout, "multiTextureCheckbox", "antiAliasingCheckbox"), 99)
+  --shift(clone(layout, "multiTextureLabel", "antiAliasingLabel"), 98).value = "SUPER-SAMPLED AA"
+  --shift(clone(layout, "multiTextureCheckbox", "antiAliasingCheckbox"), 99)
   -- Create new lighting toggle
-  shift(clone(layout, "multiTextureLabel", "newLightingLabel"), 0, -11).value = "NEW LIGHTING"
-  shift(clone(layout, "multiTextureCheckbox", "newLightingCheckbox"), 0, -11)
+  --shift(clone(layout, "multiTextureLabel", "newLightingLabel"), 0, -11).value = "NEW LIGHTING"
+  --shift(clone(layout, "multiTextureCheckbox", "newLightingCheckbox"), 0, -11)
   -- Create hardware cursor toggle
-  shift(clone(layout, "multiTextureLabel", "hardwareCursorLabel"), 98, -11).value = "HARDWARE CURSOR"
-  shift(clone(layout, "multiTextureCheckbox", "hardwareCursorCheckbox"), 99, -11)
+  shift(clone(layout, "interactiveHighlightLabel", "hardwareCursorLabel"), 98, -11).value = "HARDWARE CURSOR"
+  shift(clone(layout, "interactiveHighlightCheckbox", "hardwareCursorCheckbox"), 99, -11)
   
   -- Create shader menu button
-  shift(moveto(clone(layout, "accept", "showShadersMenu"), layout.interfaceScaleSlider), 112, -2).caption = "Shaders"
+  --shift(moveto(clone(layout, "accept", "showShadersMenu"), layout.interfaceScaleSlider), 112, -2).caption = "Shaders"
   
 
   shift(layout.title, 0, 24)
