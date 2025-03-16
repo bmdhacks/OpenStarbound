@@ -481,7 +481,6 @@ find_package(zstd CONFIG REQUIRED)
 include_directories(SYSTEM
     ${FREETYPE_INCLUDE_DIRS}
     ${OGGVORBIS_INCLUDE_DIR}
-    ${ASTCENC_INCLUDE_DIR}
 )
 
 set(STAR_EXT_LIBS ${STAR_EXT_LIBS}
