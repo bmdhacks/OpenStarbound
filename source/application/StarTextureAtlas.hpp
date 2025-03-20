@@ -400,7 +400,6 @@ auto TextureAtlasSet<AtlasTextureHandle>::addTextureToAtlas(TextureAtlas* atlas,
   Vec2U imageSize = image.size();
 
   if (atlas->isCompressed) {
-    Logger::error("Um.... we're trying to add a texture to a compressed atlas?");
     return {};
   }
 

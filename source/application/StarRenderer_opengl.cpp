@@ -561,8 +561,6 @@ bool OpenGlRenderer::GlTextureAtlasSet::isFullyCompressed() {
 }
 
 void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
-  Logger::info("GlTextureAtlasSet::compressAtlasSet: Starting atlas compression check");
-
   bool needsCompression = false;
   int totalAtlases = 0, compressedAtlases = 0;
   for (auto const& atlas : m_atlases) {
@@ -573,9 +571,7 @@ void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
       needsCompression = true;
     }
   }
-  Logger::info("GlTextureAtlasSet::compressAtlasSet: Found {}/{} atlases already compressed", compressedAtlases, totalAtlases);
   if (!needsCompression) {
-    Logger::info("GlTextureAtlasSet::compressAtlasSet: No textures need compression, skipping");
     return;
   }
 
@@ -589,7 +585,6 @@ void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
 
   constexpr int thread_count = 6;
   astcenc_context* context;
-  Logger::info("GlTextureAtlasSet::compressAtlasSet: Allocating ASTC context with {} threads", thread_count);
   if (astcenc_context_alloc(&config, thread_count, &context) != ASTCENC_SUCCESS) {
     Logger::error("GlTextureAtlasSet::compressAtlasSet: Could not allocate ASTC context");
     return;
@@ -599,11 +594,9 @@ void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
   
   for (auto& atlas : m_atlases) {
     if (atlas->isCompressed) {
-      Logger::info("GlTextureAtlasSet::compressAtlasSet: Skipping already compressed atlas {}",(void*)atlas.get());
       continue;
     }
 
-    Logger::info("GlTextureAtlasSet::compressAtlasSet: Starting COMPRESSION for atlas {}", (void*)atlas.get());
     Vec2U size = atlasTextureSize();
     glFinish();
     Image atlasImage = getAtlasImageData(atlas->atlasTexture, size);
@@ -652,7 +645,6 @@ void OpenGlRenderer::GlTextureAtlasSet::compressAtlasSet() {
     glCompressedTexImage2D(GL_TEXTURE_2D, 0, GL_COMPRESSED_RGBA_ASTC_8x8_KHR, size[0], size[1], 0, compressedSize, compressedData.data());
     atlas->atlasTexture = newTextureId;
     atlas->isCompressed = true;
-    Logger::info("Successfully compressed texture atlas {}",(void*)atlas.get());
   }
 
   astcenc_context_free(context);
@@ -720,10 +712,8 @@ Image OpenGlRenderer::GlTextureAtlasSet::getAtlasImageData(GLuint textureId, Vec
   return atlasImage;
 }
 
-OpenGlRenderer::GlTextureGroup::GlTextureGroup(unsigned atlasNumCells)
-    : textureAtlasSet(atlasNumCells) {
-  Logger::info("Texture group {} has atlas set {}", (void*)this, (void*)&textureAtlasSet);
-}
+OpenGlRenderer::GlTextureGroup::GlTextureGroup(unsigned atlasNumCells) : textureAtlasSet(atlasNumCells) {}
+
 
 OpenGlRenderer::GlTextureGroup::~GlTextureGroup() {
   textureAtlasSet.reset();
@@ -751,20 +741,16 @@ bool OpenGlRenderer::GlTextureGroup::isCompressed() {
   return textureAtlasSet.isFullyCompressed();
 }
 
+// I don't think this method is called anywhere
 void OpenGlRenderer::GlTextureGroup::compressTextures() {
-  Logger::info("GlTextureGroup::compressTextures: START SIMPLE COMPRESSION");
-  
   // Now attempt compression
   textureAtlasSet.compressAtlasSet();
-  
-  Logger::info("GlTextureGroup::compressTextures: END SIMPLE COMPRESSION");
 }
 
 void OpenGlRenderer::GlTextureGroup::reset() {
   // Reset the entire atlas set which will expire all textures
   textureAtlasSet.reset();
   glFinish(); // we just deleted a lot of textures so let's wait for it to happen
-  Logger::info("GlTextureGroup::resetAllAtlases: All atlases have been reset");
 }
 
 OpenGlRenderer::GlGroupedTexture::~GlGroupedTexture() {

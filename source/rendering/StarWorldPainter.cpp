@@ -31,7 +31,6 @@ void WorldPainter::renderInit(RendererPtr renderer) {
 
   m_renderer = std::move(renderer);
   auto textureGroup = m_renderer->createTextureGroup(TextureGroupSize::Small);
-  Logger::info("World painter texture atlas is {}", (void*)&*textureGroup);
   m_textPainter = make_shared<TextPainter>(m_renderer, textureGroup);
   m_tilePainter = make_shared<TilePainter>(m_renderer);
   m_drawablePainter = make_shared<DrawablePainter>(m_renderer, make_shared<AssetTextureGroup>(textureGroup));

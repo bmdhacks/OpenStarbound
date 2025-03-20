@@ -14,7 +14,6 @@ namespace Star {
 TilePainter::TilePainter(RendererPtr renderer) : TileDrawer() {
   m_renderer = std::move(renderer);
   m_textureGroup = m_renderer->createTextureGroup(TextureGroupSize::Medium);
-  Logger::info("TilePainter texture group is {}", (void*)&*m_textureGroup);
 
   auto& root = Root::singleton();
   auto assets = root.assets();

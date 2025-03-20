@@ -2016,7 +2016,6 @@ void Player::teleportOut(String const& animationType, bool deploy) {
 }
 
 void Player::teleportIn() {
-  Logger::info("TELEPORTING IN MOTHERFUCKER");
   m_state = State::TeleportIn;
   m_effectsAnimator->setState("teleport", m_teleportAnimationType + "In");
   m_teleportTimer = m_deployment->isDeployed() ? m_config->deployInTime : m_config->teleportInTime;

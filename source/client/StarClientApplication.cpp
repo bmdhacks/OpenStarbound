@@ -415,11 +415,8 @@ void ClientApplication::render() {
       auto isTeleporting = (m_player->currentState() == Player::State::TeleportIn);
       if ((!m_wasInWorld && m_player->inWorld() && !isTeleporting) || // in/out of world happens early in teleport too
           (m_wasTeleporting && !isTeleporting)) { // better to trigger at the end of the teleport when all textures are loaded
-        static int counter=0;
-        Logger::info("Trying to optimize because wasInWorld={} player->inWorld={} wasTeleporting={} currentState={} counter={}",
-                     m_wasInWorld, m_player->inWorld(), m_wasTeleporting, Player::StateNames.getRight(m_player->currentState()), counter);
+        // if for some reason we call this too much it'll just noop with all textures compressed
         m_worldPainter->optimizeTextures();
-        counter++;
       }
       m_wasInWorld=m_player->inWorld();
       m_wasTeleporting = isTeleporting;

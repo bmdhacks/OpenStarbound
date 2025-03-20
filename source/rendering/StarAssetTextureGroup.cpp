@@ -133,7 +133,6 @@ TexturePtr AssetTextureGroup::loadTexture(AssetPath const& imagePath, bool tryTe
   return texture;
 }
 
-
 void AssetTextureGroup::optimalPackingSort(List<pair<AssetPath, Vec2U>>& textures) {
   // Hybrid sorting approach for optimal 2D bin packing
   
@@ -181,8 +180,6 @@ void AssetTextureGroup::optimalPackingSort(List<pair<AssetPath, Vec2U>>& texture
           return sizeA[1] > sizeB[1];
         return sizeA[0] > sizeB[0];
       });
-      
-      Logger::info("AssetTextureGroup: Sorted {} tall textures", groupTextures.size());
     }
     else if (aspectClass == AspectClass::Wide) {
       // Wide textures: sort by width (widest first), then by height
@@ -193,8 +190,6 @@ void AssetTextureGroup::optimalPackingSort(List<pair<AssetPath, Vec2U>>& texture
           return sizeA[0] > sizeB[0];
         return sizeA[1] > sizeB[1];
       });
-      
-      Logger::info("AssetTextureGroup: Sorted {} wide textures", groupTextures.size());
     }
     else { // AspectClass::Square
       // Square-ish textures: sort by max dimension, then by area
@@ -207,16 +202,12 @@ void AssetTextureGroup::optimalPackingSort(List<pair<AssetPath, Vec2U>>& texture
           return maxA > maxB;
         return (sizeA[0] * sizeA[1]) > (sizeB[0] * sizeB[1]);
       });
-      
-      Logger::info("AssetTextureGroup: Sorted {} square-ish textures", groupTextures.size());
     }
     
     // Add group textures to main list
     for (auto& texture : groupTextures)
       textures.append(std::move(texture));
   }
-  
-  Logger::info("AssetTextureGroup: Sorted {} total textures using hybrid aspect-ratio optimization", textures.size());
 }
 
 void AssetTextureGroup::optimizeAtlasesSafely(RendererPtr renderer, int64_t textureTimeout) {
@@ -227,8 +218,6 @@ void AssetTextureGroup::optimizeAtlasesSafely(RendererPtr renderer, int64_t text
     return;
   }
 
-  Logger::info("AssetTextureGroup: {} active textures after cleanup", m_textureMap.size());
-  
   // Make sure all pending GPU operations are complete
   renderer->flush();
 
@@ -241,7 +230,7 @@ void AssetTextureGroup::optimizeAtlasesSafely(RendererPtr renderer, int64_t text
   m_textureGroup->reset(); // this removes every atlas and all images in it..
   if (m_textureMap.empty()) {
     // short circuit the null case, but if we're here it means we timed this optimization pass poorly
-    Logger::info("Bailing from optimizing an empty texture group.  Look into better sinchronization.");
+    Logger::info("Bailing from optimizing an empty texture group.  Look into better synchronization.");
     return;
   }
   
@@ -260,30 +249,19 @@ void AssetTextureGroup::optimizeAtlasesSafely(RendererPtr renderer, int64_t text
   optimalPackingSort(texturesToPack);
   
   // now load it all back in in optimal order
-  Logger::info("AssetTextureGroup: Reloading {} textures in optimal order", texturesToPack.size());
-  int successCount = 0;
   for (auto const& pack : texturesToPack) {
     // note that this texture image is just dropped on the floor to be deleted.
     // if it ends up actually being loaded (and isnt a duplicate or something) then
-    // loadTexture will tell the texture blit it into the atlas so that we don't really need the
+    // loadTexture will blit it into the atlas so that we don't really need the
     // asset image anymore
     auto texture = loadTexture(pack.first);
-    if (texture) {
-      successCount++;
-      if (successCount % 50 == 0)
-        Logger::info("AssetTextureGroup: Loaded {} textures", successCount);
-    } else {
+    if (!texture) {
       Logger::error("AssetTextureGroup: Failed to load texture: {}", pack.first.basePath);
     }
   }
   
   // Finally compress the atlas image
-  Logger::info("AssetTextureGroup: Compressing optimized atlases");
   renderer->compressTextureGroupSafely(m_textureGroup);
-  
-  Logger::info("AssetTextureGroup: Atlas optimization complete - {} textures loaded", successCount);
-  Logger::info("AssetTextureGroup: {} textures in deduplication map", m_textureDeduplicationMap.size());
-  Logger::info("AssetTextureGroup: {} textures in textureMap", m_textureMap.size());
 }
 
 void AssetTextureGroup::stats() {
