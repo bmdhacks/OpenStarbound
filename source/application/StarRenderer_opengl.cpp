@@ -112,6 +112,7 @@ OpenGlRenderer::OpenGlRenderer() {
 
   m_limitTextureGroupSize = false;
   m_useMultiTexturing = true;
+  m_useASTCCompression = true;
 
   logGlErrorSummary("OpenGL errors during renderer initialization");
 }
@@ -387,6 +388,10 @@ void OpenGlRenderer::setMultiTexturingEnabled(bool enabled) {
   m_useMultiTexturing = enabled;
 }
 
+void OpenGlRenderer::setASTCEnabled(bool enabled) {
+  m_useASTCCompression = enabled;
+}
+
 TextureGroupPtr OpenGlRenderer::createTextureGroup(TextureGroupSize textureSize, TextureFiltering filtering) {
   int maxTextureSize;
   glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
@@ -454,10 +459,15 @@ void OpenGlRenderer::startFrame() {
 }
 
 void OpenGlRenderer::compressTextureGroupSafely(TextureGroupPtr textureGroup) {
+  // short circuit if it's disabled
+  if (!m_useASTCCompression) {
+    return;
+  }
+
   // Get the current state
   GLint currentFBO;
   glGetIntegerv(GL_FRAMEBUFFER_BINDING, &currentFBO);
-  
+
   // Make sure all pending operations are complete
   glFinish();
   

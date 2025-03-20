@@ -249,6 +249,7 @@ void ClientApplication::renderInit(RendererPtr renderer) {
     renderer->setSizeLimitEnabled(true);
 
   renderer->setMultiTexturingEnabled(m_root->configuration()->get("useMultiTexturing").optBool().value(true));
+  renderer->setASTCEnabled(m_root->configuration()->get("useASTC").optBool().value(true));
 
   m_guiContext->renderInit(renderer);
 

@@ -35,6 +35,7 @@ public:
   TexturePtr createTexture(Image const& texture, TextureAddressing addressing, TextureFiltering filtering) override;
   void setSizeLimitEnabled(bool enabled) override;
   void setMultiTexturingEnabled(bool enabled) override;
+  void setASTCEnabled(bool enabled) override;
   TextureGroupPtr createTextureGroup(TextureGroupSize size, TextureFiltering filtering) override;
   RenderBufferPtr createRenderBuffer() override;
 
@@ -232,6 +233,7 @@ private:
 
   bool m_limitTextureGroupSize;
   bool m_useMultiTexturing;
+  bool m_useASTCCompression;
   List<shared_ptr<GlTextureGroup>> m_liveTextureGroups;
 
   List<RenderPrimitive> m_immediatePrimitives;

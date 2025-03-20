@@ -166,6 +166,7 @@ public:
       TextureFiltering filtering = TextureFiltering::Nearest) = 0;
   virtual void setSizeLimitEnabled(bool enabled) = 0;
   virtual void setMultiTexturingEnabled(bool enabled) = 0;
+  virtual void setASTCEnabled(bool enabled) = 0;
   virtual TextureGroupPtr createTextureGroup(TextureGroupSize size = TextureGroupSize::Medium, TextureFiltering filtering = TextureFiltering::Nearest) = 0;
   virtual RenderBufferPtr createRenderBuffer() = 0;
 
