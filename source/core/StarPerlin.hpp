@@ -239,7 +239,7 @@ public:
     return *this;
   }
 
-  // Core functionality: hash-based deterministic value generation
+  // Core functionality: hash-based deterministic value generation with smoothing
   Float get(Float x) const {
     Float value = 0;
     Float scale = 1.0;
@@ -247,7 +247,22 @@ public:
     x *= m_frequency;
     
     for (unsigned i = 0; i < m_octaves; ++i) {
-      value += hashFloat(computeHash(x)) / scale;
+      // Get integer grid points
+      int x0 = floor(x);
+      int x1 = x0 + 1;
+      
+      // Get fractional part for interpolation
+      Float fx = x - x0;
+      
+      // Sample at grid points
+      Float n0 = hashFloat(computeHash(x0));
+      Float n1 = hashFloat(computeHash(x1));
+      
+      // Apply smooth interpolation
+      Float sx = s_curve(fx);
+      Float interpolated = (1.0 - sx) * n0 + sx * n1;
+      
+      value += interpolated / scale;
       scale *= m_alpha;
       x *= m_beta;
     }
@@ -263,7 +278,34 @@ public:
     y *= m_frequency;
     
     for (unsigned i = 0; i < m_octaves; ++i) {
-      value += hashFloat(computeHash(x, y)) / scale;
+      // Get integer grid points
+      int x0 = floor(x);
+      int x1 = x0 + 1;
+      int y0 = floor(y);
+      int y1 = y0 + 1;
+      
+      // Get fractional part for interpolation
+      Float fx = x - x0;
+      Float fy = y - y0;
+      
+      // Sample at grid corners
+      Float n00 = hashFloat(computeHash(x0, y0));
+      Float n10 = hashFloat(computeHash(x1, y0));
+      Float n01 = hashFloat(computeHash(x0, y1));
+      Float n11 = hashFloat(computeHash(x1, y1));
+      
+      // Apply smooth interpolation (bilinear with s-curve)
+      Float sx = s_curve(fx);
+      Float sy = s_curve(fy);
+      
+      // Interpolate along x for both y values
+      Float nx0 = (1.0 - sx) * n00 + sx * n10;
+      Float nx1 = (1.0 - sx) * n01 + sx * n11;
+      
+      // Interpolate along y
+      Float interpolated = (1.0 - sy) * nx0 + sy * nx1;
+      
+      value += interpolated / scale;
       scale *= m_alpha;
       x *= m_beta;
       y *= m_beta;
@@ -281,7 +323,48 @@ public:
     z *= m_frequency;
     
     for (unsigned i = 0; i < m_octaves; ++i) {
-      value += hashFloat(computeHash(x, y, z)) / scale;
+      // Get integer grid points
+      int x0 = floor(x);
+      int x1 = x0 + 1;
+      int y0 = floor(y);
+      int y1 = y0 + 1;
+      int z0 = floor(z);
+      int z1 = z0 + 1;
+      
+      // Get fractional part for interpolation
+      Float fx = x - x0;
+      Float fy = y - y0;
+      Float fz = z - z0;
+      
+      // Sample at grid corners
+      Float n000 = hashFloat(computeHash(x0, y0, z0));
+      Float n100 = hashFloat(computeHash(x1, y0, z0));
+      Float n010 = hashFloat(computeHash(x0, y1, z0));
+      Float n110 = hashFloat(computeHash(x1, y1, z0));
+      Float n001 = hashFloat(computeHash(x0, y0, z1));
+      Float n101 = hashFloat(computeHash(x1, y0, z1));
+      Float n011 = hashFloat(computeHash(x0, y1, z1));
+      Float n111 = hashFloat(computeHash(x1, y1, z1));
+      
+      // Apply smooth interpolation (trilinear with s-curve)
+      Float sx = s_curve(fx);
+      Float sy = s_curve(fy);
+      Float sz = s_curve(fz);
+      
+      // Interpolate along x for each y,z combination
+      Float nx00 = (1.0 - sx) * n000 + sx * n100;
+      Float nx10 = (1.0 - sx) * n010 + sx * n110;
+      Float nx01 = (1.0 - sx) * n001 + sx * n101;
+      Float nx11 = (1.0 - sx) * n011 + sx * n111;
+      
+      // Interpolate along y
+      Float nxy0 = (1.0 - sy) * nx00 + sy * nx10;
+      Float nxy1 = (1.0 - sy) * nx01 + sy * nx11;
+      
+      // Interpolate along z
+      Float interpolated = (1.0 - sz) * nxy0 + sz * nxy1;
+      
+      value += interpolated / scale;
       scale *= m_alpha;
       x *= m_beta;
       y *= m_beta;
@@ -329,6 +412,11 @@ private:
     // Use the lower 32 bits for better distribution
     uint32_t value = hash & 0xFFFFFFFF;
     return (Float(value) / Float(0xFFFFFFFF)) * 2.0 - 1.0;
+  }
+  
+  // Helper function for smooth interpolation (cubic Hermite curve)
+  static Float s_curve(Float t) {
+    return t * t * (3.0 - 2.0 * t);
   }
 
   // Compute hash for a specific coordinate set
