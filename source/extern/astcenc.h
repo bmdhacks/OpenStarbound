@@ -171,13 +171,24 @@
 #include <cstdint>
 
 #if defined(ASTCENC_DYNAMIC_LIBRARY)
-	#if defined(_MSC_VER)
-		#define ASTCENC_PUBLIC extern "C" __declspec(dllexport)
-	#else
-		#define ASTCENC_PUBLIC extern "C" __attribute__ ((visibility ("default")))
-	#endif
+    #if defined(_MSC_VER)
+        #define ASTCENC_PUBLIC extern "C" __declspec(dllexport)
+    #else
+        #define ASTCENC_PUBLIC extern "C" __attribute__ ((visibility ("default")))
+    #endif
 #else
-	#define ASTCENC_PUBLIC extern "C"
+    // For static builds, choose linkage based on architecture.
+    #if defined(__aarch64__) || defined(_M_ARM64)
+        // On ARM64, use C++ linkage (no extern "C") because the library symbols are mangled.
+        #define ASTCENC_PUBLIC
+    #else
+        // On x86/x86_64, assume the library uses C linkage.
+        #ifdef __cplusplus
+            #define ASTCENC_PUBLIC extern "C"
+        #else
+            #define ASTCENC_PUBLIC
+        #endif
+    #endif
 #endif
 
 /* ============================================================================
